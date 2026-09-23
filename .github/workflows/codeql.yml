@@ -1,23 +1,39 @@
 name: "CodeQL"
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: '0 6 * * 1'
+  workflow_dispatch:
 jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
       security-events: write
     strategy:
+      fail-fast: false
       matrix:
         language: ['javascript', 'go']
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check if language code exists
+        id: check
+        run: |
+          case "${{ matrix.language }}" in
+            javascript)
+              [ -f package.json ] && echo "found=true" >> $GITHUB_OUTPUT || echo "found=false" >> $GITHUB_OUTPUT
+              ;;
+            go)
+              [ -f go.mod ] && echo "found=true" >> $GITHUB_OUTPUT || echo "found=false" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
       - uses: github/codeql-action/init@v3
+        if: steps.check.outputs.found == 'true'
         with:
           languages: ${{ matrix.language }}
+
       - uses: github/codeql-action/autobuild@v3
+        if: steps.check.outputs.found == 'true'
+
       - uses: github/codeql-action/analyze@v3
+        if: steps.check.outputs.found == 'true'
