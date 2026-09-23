@@ -1,0 +1,35 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust tests
+        run: |
+          if [ -f Cargo.toml ]; then
+            cargo test --workspace
+          else
+            echo "No Cargo.toml yet, skipping"
+          fi
+
+      - name: Node tests
+        run: |
+          if [ -f package.json ]; then
+            npm ci && npm test
+          else
+            echo "No package.json yet, skipping"
+          fi
+
+      - name: Go tests
+        run: |
+          if [ -f go.mod ]; then
+            go test ./...
+          else
+            echo "No go.mod yet, skipping"
+          fi
