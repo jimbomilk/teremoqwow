@@ -13,7 +13,7 @@ jobs:
       matrix:
         language: ['javascript', 'go']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check if language code exists
         id: check
