@@ -15,4 +15,4 @@ Plataforma de broadcast de latencia ultra baja sobre Media over QUIC (MoQ), con 
 
 ## Estado
 
-Fase 0: Fundación.
+Fase 0: FundaciON
