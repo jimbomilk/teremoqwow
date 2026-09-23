@@ -1,4 +1,4 @@
-# teremoqwow
+# teremoq wow 
 
 Plataforma de broadcast de latencia ultra baja sobre Media over QUIC (MoQ), con telemetría e interactividad sincronizadas.
 
