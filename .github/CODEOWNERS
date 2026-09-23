@@ -1,0 +1,21 @@
+# ─── Propietario por defecto ───────────────────────────────────────────
+# Cualquier ruta no listada explícitamente requiere tu revisión.
+* @jimbomilk
+
+# ─── Rutas PÚBLICAS (no requieren tu revisión) ─────────────────────────
+# Los usuarios necesitan estas partes para desplegar su relay o usar el player.
+/schemas/       @jimbomilk
+/docs/          @jimbomilk
+/player/        @jimbomilk
+/relay/         @jimbomilk
+/docker-compose.yml @jimbomilk
+
+# ─── Rutas PROTEGIDAS (requieren tu revisión obligatoria) ──────────────
+# Lógica crítica del motor, negocio y configuración.
+/core/          @jimbomilk
+/comercial/     @jimbomilk
+/config/        @jimbomilk
+/.github/       @jimbomilk
+/adapters/      @jimbomilk
+/drm/           @jimbomilk
+/qos/           @jimbomilk
