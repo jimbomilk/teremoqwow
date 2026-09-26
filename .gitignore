@@ -1,0 +1,4 @@
+github-projectv2/
+.venv/
+*.bak
+*.corrupto
