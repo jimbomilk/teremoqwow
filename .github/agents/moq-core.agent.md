@@ -2,7 +2,7 @@
 name: MoQ Core
 description: Gestiona el relay MoQ, clustering, federación de nodos y enrutamiento entre relays.
 model: 'Claude Sonnet 4.6 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search']
 agents: ['Arquitecto', 'Media Pipeline', 'Sync & Telemetry']
 handoffs:
   - label: "Notificar pipeline listo"
