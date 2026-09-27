@@ -1,0 +1,85 @@
+{
+  "$schema": "https://www.krakend.io/schema/v2.10/krakend.json",
+  "version": 3,
+  "name": "teremoqwow-gateway",
+  "port": 8080,
+  "timeout": "3s",
+  "cache_ttl": "0s",
+  "output_encoding": "json",
+  "extra_config": {
+    "telemetry/opencensus": {
+      "sample_rate": 100,
+      "reporting_period": 5,
+      "exporters": {
+        "prometheus": {
+          "port": 9090,
+          "namespace": "teremoqwow",
+          "tag_host": true,
+          "tag_path": true,
+          "tag_method": true,
+          "tag_statuscode": true
+        }
+      }
+    },
+    "telemetry/opentelemetry": {
+      "service_name": "teremoqwow-gateway",
+      "metric_reporting_period": 30,
+      "trace_sample_rate": 0.1,
+      "exporters": {
+        "otlp": [
+          {
+            "name": "collector",
+            "host": "otel-collector",
+            "port": 4317,
+            "use_http": false
+          }
+        ]
+      }
+    },
+    "security/cors": {
+      "allow_origins": ["*"],
+      "allow_methods": ["GET", "POST", "OPTIONS"],
+      "allow_headers": ["Origin", "Authorization", "Content-Type"],
+      "expose_headers": ["Content-Length"],
+      "max_age": "12h"
+    }
+  },
+  "endpoints": [
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "output_encoding": "json",
+      "backend": [
+        {
+          "url_pattern": "/__health",
+          "host": ["http://localhost:8080"],
+          "extra_config": {
+            "backend/static": {
+              "data": { "status": "ok", "service": "teremoqwow-gateway" },
+              "strategy": "always"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "/registry/join",
+      "method": "POST",
+      "output_encoding": "json",
+      "input_headers": ["Authorization", "Content-Type"],
+      "extra_config": {
+        "validation/json-schema": {
+          "$ref": "file:///etc/krakend/schemas/registry-join.json"
+        }
+      },
+      "backend": [
+        {
+          "url_pattern": "/v1/registry/join",
+          "method": "POST",
+          "host": ["http://registry:8081"],
+          "encoding": "json"
+        }
+      ]
+    }
+  ]
+}
