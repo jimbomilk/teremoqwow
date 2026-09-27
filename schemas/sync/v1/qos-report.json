@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/qos-report.json",
+  "title": "QoSReport",
+  "description": "Reporte periódico de calidad de servicio emitido por el player al gateway teremoqwow.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["broadcast", "session_id", "window", "metrics"],
+  "properties": {
+    "broadcast": { "type": "string" },
+    "session_id": { "type": "string" },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "user_agent": { "type": "string" },
+        "app_version": { "type": "string" },
+        "region": { "type": "string", "description": "Código de región del cliente (GeoIP)." }
+      }
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json" },
+        "end":   { "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["playback_ms", "rebuffer_ms", "startup_ms", "e2e_latency_ms_p95"],
+      "properties": {
+        "playback_ms":         { "type": "integer", "minimum": 0 },
+        "rebuffer_ms":         { "type": "integer", "minimum": 0 },
+        "rebuffer_count":      { "type": "integer", "minimum": 0 },
+        "startup_ms":          { "type": "integer", "minimum": 0 },
+        "e2e_latency_ms_p50":  { "type": "integer", "minimum": 0 },
+        "e2e_latency_ms_p95":  { "type": "integer", "minimum": 0 },
+        "e2e_latency_ms_p99":  { "type": "integer", "minimum": 0 },
+        "dropped_frames":      { "type": "integer", "minimum": 0 },
+        "decoded_frames":      { "type": "integer", "minimum": 0 },
+        "bitrate_kbps_avg":    { "type": "integer", "minimum": 0 },
+        "quality_switches":    { "type": "integer", "minimum": 0 },
+        "current_rendition":   { "type": "string" }
+      }
+    }
+  }
+}

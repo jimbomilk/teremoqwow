@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/registry/v1/registry-join.json",
+  "title": "RegistryJoin",
+  "description": "Alta o renovación de un nodo relay en el registry central de teremoqwow.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node", "auth_token"],
+  "properties": {
+    "node": {
+      "$ref": "https://teremoqwow.dev/schemas/registry/v1/node.json"
+    },
+    "auth_token": {
+      "type": "string",
+      "description": "JWT firmado que autentica al operador del nodo.",
+      "minLength": 20
+    },
+    "ttl_seconds": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 86400,
+      "default": 300,
+      "description": "Tiempo de vida del anuncio; el nodo debe renovar antes de expirar."
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "active_subscribers": { "type": "integer", "minimum": 0 },
+        "used_mbps": { "type": "integer", "minimum": 0 },
+        "cpu_pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    }
+  }
+}
