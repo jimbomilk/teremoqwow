@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/registry/v1/node.json",
+  "title": "Node",
+  "description": "Nodo relay dentro de la federación teremoqwow.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "endpoint", "region"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "endpoint": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL MoQ (WebTransport)."
+    },
+    "region": {
+      "type": "string",
+      "description": "Código de región (p.ej. 'eu-west-1')."
+    },
+    "capacity_mbps": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

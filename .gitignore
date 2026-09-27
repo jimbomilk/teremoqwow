@@ -1,4 +1,68 @@
+# ── Herramientas locales ─────────────────────────────────────────────
 github-projectv2/
 .venv/
 *.bak
 *.corrupto
+.DS_Store
+Thumbs.db
+
+# ── Editor / IDE ─────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/mcp.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ── Secretos y entornos ──────────────────────────────────────────────
+*.env
+.env
+.env.*
+!*.env.example
+!config/.env.example
+*.pem
+*.key
+!schemas/**/*.pem
+
+# ── Node / TypeScript ────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+.pnpm-store/
+coverage/
+*.tsbuildinfo
+
+# ── Rust ─────────────────────────────────────────────────────────────
+target/
+# Cargo.lock: versionado para binarios (relay/, core/).
+#             Ignorar en crates de librería añadiendo `/<lib>/Cargo.lock`
+#             en el .gitignore local de cada crate.
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Go ───────────────────────────────────────────────────────────────
+*.exe
+*.test
+*.out
+
+# ── Media artefactos temporales ──────────────────────────────────────
+**/media-cache/
+*.mp4
+*.ts
+*.m3u8
+*.mpd
+*.m4s
+!schemas/**/*.ts
+
+# ── Rulesets / gh temporales ─────────────────────────────────────────
+.gh-cache/
+

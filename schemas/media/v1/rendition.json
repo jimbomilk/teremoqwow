@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/media/v1/rendition.json",
+  "title": "Rendition",
+  "description": "Definición de una calidad de vídeo/audio producida por moq-mux.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "codec", "bitrate_kbps"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Identificador en kebab-case, único dentro del catálogo."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["video", "audio"]
+    },
+    "codec": {
+      "type": "string",
+      "description": "MIME type con parámetros RFC 6381 (p.ej. 'video/mp4; codecs=\"avc1.640028\"')."
+    },
+    "bitrate_kbps": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Sólo para vídeo."
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Sólo para vídeo."
+    },
+    "framerate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Sólo para vídeo."
+    },
+    "channels": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Sólo para audio."
+    },
+    "sample_rate_hz": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Sólo para audio."
+    }
+  }
+}

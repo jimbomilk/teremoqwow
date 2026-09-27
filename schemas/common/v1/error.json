@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/common/v1/error.json",
+  "title": "Error",
+  "description": "Envelope de error uniforme para APIs y eventos internos.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "Código estable en SCREAMING_SNAKE_CASE.",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "message": {
+      "type": "string",
+      "description": "Mensaje humano en inglés."
+    },
+    "details": {
+      "type": "object",
+      "description": "Payload libre con contexto adicional."
+    },
+    "trace_id": {
+      "type": "string",
+      "description": "Correlación de traza (W3C traceparent id)."
+    }
+  }
+}

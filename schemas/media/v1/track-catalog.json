@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/media/v1/track-catalog.json",
+  "title": "TrackCatalog",
+  "description": "Catálogo de tracks MoQ publicados por moq-mux para un broadcast.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["namespace", "renditions"],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "description": "Namespace MoQ del broadcast."
+    },
+    "created_at": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "renditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://teremoqwow.dev/schemas/media/v1/rendition.json"
+      }
+    }
+  }
+}
