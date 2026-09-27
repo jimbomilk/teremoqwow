@@ -16,3 +16,4 @@ Configuración declarativa por servicio.
 - `srt-bond/` — bond SRT active-backup entre encoders y MediaMTX (issue [#53](https://github.com/jimbomilk/teremoqwow/issues/53)).
 - `relay/` — configuración del relay (issue [#54](https://github.com/jimbomilk/teremoqwow/issues/54)).
 - `krakend/` — configuración de KrakenD (issue [#55](https://github.com/jimbomilk/teremoqwow/issues/55)).
+- `moq-mux/` — pipeline FFmpeg → moq-pub: transcodificación ABR 3 renditions + catálogo MoQ (issue [#56](https://github.com/jimbomilk/teremoqwow/issues/56)).

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "namespace": "teremoqwow/dev/live1",
+  "created_at": {
+    "wallclock_ns": 1790467200000000000,
+    "source": "ntp"
+  },
+  "tracks": [
+    {
+      "name": "video-high",
+      "kind": "video",
+      "codec": "avc1.4D4028",
+      "init_track": "video-high.init",
+      "bitrate_kbps": 3000,
+      "width": 1920,
+      "height": 1080,
+      "framerate": 30,
+      "role": "main",
+      "selection_group": "video-abr"
+    },
+    {
+      "name": "video-medium",
+      "kind": "video",
+      "codec": "avc1.4D401F",
+      "init_track": "video-medium.init",
+      "bitrate_kbps": 2000,
+      "width": 1280,
+      "height": 720,
+      "framerate": 30,
+      "role": "main",
+      "selection_group": "video-abr"
+    },
+    {
+      "name": "video-low",
+      "kind": "video",
+      "codec": "avc1.4D401E",
+      "init_track": "video-low.init",
+      "bitrate_kbps": 1000,
+      "width": 854,
+      "height": 480,
+      "framerate": 30,
+      "role": "main",
+      "selection_group": "video-abr"
+    },
+    {
+      "name": "audio-main",
+      "kind": "audio",
+      "codec": "mp4a.40.2",
+      "init_track": "audio-main.init",
+      "bitrate_kbps": 128,
+      "channels": 2,
+      "sample_rate_hz": 48000,
+      "role": "main",
+      "language": "es"
+    }
+  ]
+}
