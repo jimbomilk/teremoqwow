@@ -2,7 +2,7 @@
 name: Arquitecto
 description: Diseña la arquitectura, define contratos y supervisa la coherencia del sistema.
 model: 'Claude Opus 4.7 (anthropic)'
-tools: ['read', 'edit', 'search', 'execute', 'github/*'] # Único agente con terminal y acceso a GitHub MCP
+tools: ['read', 'edit', 'search', 'execute', 'github/*',agent] # Único agente con terminal y acceso a GitHub MCP
 agents: # Agentes a los que puede delegar tareas
   - Media Pipeline
   - MoQ Core
