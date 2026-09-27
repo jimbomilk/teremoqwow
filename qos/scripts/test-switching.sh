@@ -286,8 +286,10 @@ export_stream() {
 verify_no_404() {
   log "Verifying no 404 errors in export..."
 
-  if grep -qi "404\|not found\|no such" "${EXPORT_LOG}"; then
-    error "Export contains 404 or 'not found' errors."
+  # Solo fallar ante errores HTTP 404 explícitos, no mensajes informativos de MoQ
+  # que contienen "not found" como parte de su log normal (ej. grupo expirado del cache).
+  if grep -qiE 'HTTP/[0-9.]+ 404|status: 404|error.*404' "${EXPORT_LOG}"; then
+    error "Export contains HTTP 404 errors."
     return 1
   fi
 
