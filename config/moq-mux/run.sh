@@ -60,29 +60,57 @@ MOQ_PID=$!
 sleep 1
 
 ##############################################################################
-# 2. Arrancar FFmpeg que publica en el listener SRT.
+# 2. Arrancar FFmpeg: 3 renditions de vídeo (High/Medium/Low) en un único
+#    MPEG-TS multi-PID enviado al listener SRT (issue #62).
 #
-#    En dev/test se usa una fuente sintética (testsrc2 + sine).
-#    En producción, sustituir la fuente por el source SRT externo real,
+#    SPS/PPS alineados entre calidades:
+#      - Perfil H.264 main en los 3 streams; sólo varía el level (4.0/3.1/3.0).
+#      - -force_key_frames sincroniza IDRs exactos cada 2 s en los 3 streams.
+#      - -sc_threshold 0 evita IDRs extra por cambio de escena que
+#        desalinearían los GOP entre calidades.
+#      - -x264-params nal-hrd=cbr:force-cfr=1 garantiza PTS síncronos.
+#
+#    En dev/test se usa fuente sintética (testsrc2 + sine).
+#    En producción sustituir la fuente por el source SRT externo real,
 #    p.ej.: -i "srt://broadcast-encoder:port?streamid=publish:live1"
-#
-#    GOP fijo de 60 frames (2 s a 30 fps), -sc_threshold 0 para evitar
-#    IDRs extra por cambio de escena; garantiza PTS alineados entre calidades.
 ##############################################################################
 
 ffmpeg -hide_banner -loglevel warning \
   -re \
   -f lavfi -i "testsrc2=size=1280x720:rate=30" \
   -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
-  -c:v libx264 \
-  -preset ultrafast \
-  -tune zerolatency \
-  -g 60 \
-  -keyint_min 60 \
-  -sc_threshold 0 \
-  -pix_fmt yuv420p \
-  -c:a aac \
-  -b:a 128k \
+  -filter_complex "[0:v]split=3[v_high][v_med][v_low]" \
+  \
+  -map "[v_high]" \
+  -map "[v_med]" \
+  -map "[v_low]" \
+  -map 1:a \
+  \
+  -c:v:0 libx264 -preset:v:0 ultrafast -tune:v:0 zerolatency \
+  -profile:v:0 main -level:v:0 4.0 \
+  -s:v:0 1280x720 -b:v:0 2500k \
+  -g:v:0 60 -keyint_min:v:0 60 -sc_threshold:v:0 0 \
+  -force_key_frames:v:0 "expr:gte(t,n_forced*2)" \
+  -x264-params:v:0 "nal-hrd=cbr:force-cfr=1" \
+  -pix_fmt:v:0 yuv420p \
+  \
+  -c:v:1 libx264 -preset:v:1 ultrafast -tune:v:1 zerolatency \
+  -profile:v:1 main -level:v:1 3.1 \
+  -s:v:1 854x480 -b:v:1 1200k \
+  -g:v:1 60 -keyint_min:v:1 60 -sc_threshold:v:1 0 \
+  -force_key_frames:v:1 "expr:gte(t,n_forced*2)" \
+  -x264-params:v:1 "nal-hrd=cbr:force-cfr=1" \
+  -pix_fmt:v:1 yuv420p \
+  \
+  -c:v:2 libx264 -preset:v:2 ultrafast -tune:v:2 zerolatency \
+  -profile:v:2 main -level:v:2 3.0 \
+  -s:v:2 640x360 -b:v:2 600k \
+  -g:v:2 60 -keyint_min:v:2 60 -sc_threshold:v:2 0 \
+  -force_key_frames:v:2 "expr:gte(t,n_forced*2)" \
+  -x264-params:v:2 "nal-hrd=cbr:force-cfr=1" \
+  -pix_fmt:v:2 yuv420p \
+  \
+  -c:a aac -b:a 128k -ar 48000 -ac 2 \
   -f mpegts "srt://127.0.0.1:8890?streamid=publish:live1" &
 FFMPEG_PID=$!
 

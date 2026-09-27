@@ -100,6 +100,49 @@ docker run --rm \
 
 ---
 
+## Alineación SPS/PPS para ABR
+
+Para que el player ABR (Fase 1, issue #60) pueda conmutar entre calidades sin
+reinicializar el decoder, los tres streams de vídeo deben compartir la misma
+estructura SPS/PPS. Esto requiere un perfil H.264 idéntico y GOP síncronos.
+
+### Perfil `main` en los tres streams
+
+El perfil H.264 determina el conjunto de herramientas de codificación. Si las
+tres calidades usan perfiles distintos (p.ej. `baseline` vs `high`), el decoder
+debe reinicializarse al conmutar, causando fotograma negro o corrupción visual.
+Con `main` en los tres, sólo varía el `level_idc` (límites de resolución/bitrate)
+y el decoder reutiliza la misma inicialización:
+
+| Calidad | Resolución | Level H.264 | Codec string  |
+|---------|------------|-------------|---------------|
+| High    | 1280×720   | 4.0         | `avc3.4D4028` |
+| Medium  | 854×480    | 3.1         | `avc3.4D401F` |
+| Low     | 640×360    | 3.0         | `avc3.4D401E` |
+
+### Por qué `-sc_threshold 0` es crítico
+
+Sin esta flag, libx264 inserta IDRs adicionales ante cambios bruscos de escena.
+Si ese IDR ocurre sólo en una calidad (porque el umbral de detección varía por
+resolución), los GOP quedan desalineados. Al conmutar de calidad en un punto que
+no es IDR en el stream de destino, el decoder produce artefactos o corrupción.
+
+`-sc_threshold 0` desactiva la detección de escena: el único origen de IDRs es
+`-force_key_frames "expr:gte(t,n_forced*2)"`, exactamente cada 2 s en los tres
+streams simultáneamente.
+
+### Comando de verificación SPS/PPS
+
+```bash
+ffprobe -v quiet -show_streams -of json <fichero.mp4> \
+  | jq '.streams[] | select(.codec_type=="video") | {codec_name, profile, level}'
+```
+
+El resultado esperado para cada stream es `"profile": "Main"` con levels `40`,
+`31` y `30` (FFprobe representa level como entero: 40 = 4.0, 31 = 3.1, 30 = 3.0).
+
+---
+
 ## Verificar que el catálogo lista los 3 tracks
 
 ### 1. Consultar el endpoint del relay

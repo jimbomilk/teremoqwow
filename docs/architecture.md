@@ -11,7 +11,7 @@ flowchart LR
   BOND -->|SRT :8890 live-main| MTX[MediaMTX]
   MTX -->|RTMP/RTP| MUX[moq-mux + FFmpeg]
   MUX -->|MoQ tracks| RELAY[moq-relay-ietf]
-  RELAY -->|MoQ| PLAYER[@moq/watch player]
+  RELAY -->|"DTS: suscripción por selection_group"| PLAYER[@moq/watch player]
   RELAY -.federación.-> RELAY2[moq-relay peer]
 
   MUX --> SYNC[Sync & Telemetry]
@@ -29,6 +29,10 @@ flowchart LR
   PLAYER --> DRM
   PLAYER --> STRIPE
 ```
+
+### Flujo DTS
+
+El relay retiene grupos activos según `max-age`; el player ABR conmuta suscripciones en las fronteras de grupo (cada IDR, alineado a 2 s). Los tracks High, Medium y Low se publican bajo el mismo `selection_group` en el catálogo: el relay los reenvía de forma transparente y el cliente decide cuál consumir en función del throughput medido.
 
 ## Módulos ↔ directorio ↔ agente responsable
 

@@ -54,3 +54,19 @@ log_level = "info"
 #   export MOQ_RELAY_LOG_LEVEL="debug"
 #
 # Útil en CI o cuando varios devs comparten la misma imagen Docker.
+
+# ── Dynamic Track Switching (DTS) ─────────────────────────────────────────────
+# moq-relay 0.15.x soporta DTS de forma nativa: los tracks publicados bajo
+# el mismo namespace y misma 'selection_group' en el catálogo son conmutables
+# por el subscriber en fronteras de grupo (cada IDR = 2s en nuestra config).
+#
+# El relay no requiere configuración adicional. Los umbrales de conmutación
+# son responsabilidad del player ABR (ver player/src/moq-watch.ts y issue #60).
+#
+# Umbrales documentados (basados en benchmarks del preset ABR de Fase 1):
+#   High  (1280x720 @3000kbps) → activar cuando throughput > 4000 kbps
+#   Medium (854x480  @2000kbps) → activar cuando 2500 < throughput ≤ 4000 kbps
+#   Low   (640x360  @1000kbps) → activar cuando throughput ≤ 2500 kbps
+#
+# Para verificar que los 3 tracks están anunciados tras arrancar la pipeline:
+#   curl http://localhost:8090/announced/
