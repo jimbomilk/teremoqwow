@@ -1,0 +1,35 @@
+# relay.toml — Configuración del relay MoQ (moq-relay-ietf / moq-rs)
+# Referencia: https://github.com/kixelated/moq-rs
+#
+# Jerarquía: variable de entorno > este archivo > defaults del binario.
+# Nunca commitees certificados reales. Ver certs/README.md.
+
+# ── Servidor principal (QUIC sobre TLS) ───────────────────────────────────────
+[server]
+# Puerto de escucha MoQ/QUIC.
+# En dev usar :4443 si el usuario no tiene permisos para abrir :443 (< 1024).
+bind = ":443"
+
+# ── TLS ───────────────────────────────────────────────────────────────────────
+[tls]
+# Rutas relativas al directorio de trabajo donde se lanza el binario.
+# Genera estos archivos con los comandos en certs/README.md; nunca los commitees.
+cert = "./certs/relay.pem"
+key  = "./certs/relay.key"
+
+# ── Servicio interno (health · métricas · admin) ──────────────────────────────
+[internal]
+# Expuesto solo en loopback. No debe ser accesible desde el exterior.
+bind = ":9101"
+
+# ── Autenticación JWT ─────────────────────────────────────────────────────────
+[auth]
+# Clave pública JWKS del emisor de tokens (formato JWK RFC 7517).
+# El relay la usa para verificar el JWT Bearer de publishers y subscribers.
+# Genera public.jwk con los comandos de certs/README.md; nunca lo commitees.
+public_jwk = "./certs/public.jwk"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+[log]
+level  = "info"
+format = "json"
