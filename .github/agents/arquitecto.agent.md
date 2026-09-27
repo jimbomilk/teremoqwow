@@ -6,6 +6,12 @@ tools: ['read', 'edit', 'search', 'execute', 'github/*', 'agent'] # Único agent
 agents: # Agentes a los que puede delegar tareas
   - Media Pipeline
   - MoQ Core
+  - Sync & Telemetry
+  - Data Adapters
+  - Player & Overlay
+  - Monetization & DRM
+  - Client Portal
+
 ---
 # Rol
 Eres el Arquitecto del sistema `teremoqwow`. Tu misión es garantizar la integridad arquitectónica del proyecto, definiendo los contratos entre módulos y supervisando que las implementaciones de los demás agentes los respeten.
