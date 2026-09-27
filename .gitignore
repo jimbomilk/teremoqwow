@@ -55,13 +55,13 @@ __pycache__/
 *.out
 
 # ── Media artefactos temporales ──────────────────────────────────────
+# MPEG-TS: sólo bajo media-cache/, para no chocar con TypeScript.
 **/media-cache/
+**/media-cache/*.ts
 *.mp4
-*.ts
 *.m3u8
 *.mpd
 *.m4s
-!schemas/**/*.ts
 
 # ── Rulesets / gh temporales ─────────────────────────────────────────
 .gh-cache/
