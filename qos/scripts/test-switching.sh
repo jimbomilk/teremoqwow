@@ -69,8 +69,10 @@ error() {
 cleanup() {
   log "Cleaning up..."
 
-  # Eliminar contenedores de test
-  docker rm -f ts-moq-relay ts-moq-import ts-ffmpeg 2>/dev/null || true
+  # Solo eliminar los contenedores que este script creó
+  docker rm -f ts-ffmpeg 2>/dev/null || true
+  [[ "${RELAY_CREATED:-0}" == "1" ]] && docker rm -f ts-moq-relay 2>/dev/null || true
+  [[ "${IMPORT_CREATED:-0}" == "1" ]] && docker rm -f ts-moq-import 2>/dev/null || true
   docker network rm teremoqwow-e2e 2>/dev/null || true
 
   # Restaurar tc qdisc (loopback)
@@ -145,42 +147,57 @@ apply_netem() {
 ##############################################################################
 
 start_pipeline() {
-  # Red docker compartida con el relay
   DOCKER_NET="teremoqwow-e2e"
   docker network create "${DOCKER_NET}" 2>/dev/null || true
 
-  log "Starting moq-relay..."
-  CERT_DIR="${REPO_ROOT}/config/relay/certs"
-  # Genera cert dev de 14 días si no existe
-  if [[ ! -f "${CERT_DIR}/relay.pem" ]]; then
-    mkdir -p "${CERT_DIR}"
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-      -keyout "${CERT_DIR}/relay.key" -out "${CERT_DIR}/relay.pem" \
-      -days 14 -nodes -subj "/CN=localhost" \
-      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
-    log "Dev cert generated (14 days)"
+  # Si ya hay un relay corriendo (moq-relay de la sesión de dev), reutilizarlo.
+  # Así evitamos conflictos de puerto y el test puede correr junto con la pipeline dev.
+  if docker ps --format '{{.Names}}' | grep -qE '^moq-relay$'; then
+    log "Relay existente detectado (moq-relay) — reutilizando."
+    RELAY_HOST="moq-relay"
+    RELAY_CREATED=0
+  else
+    log "Starting moq-relay..."
+    CERT_DIR="${REPO_ROOT}/config/relay/certs"
+    if [[ ! -f "${CERT_DIR}/relay.pem" ]]; then
+      mkdir -p "${CERT_DIR}"
+      openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+        -keyout "${CERT_DIR}/relay.key" -out "${CERT_DIR}/relay.pem" \
+        -days 14 -nodes -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
+      log "Dev cert generated (14 days)"
+    fi
+    docker run -d --name ts-moq-relay --network "${DOCKER_NET}" \
+      -p 4444:4444 -p 8090:8090 \
+      -v "${CERT_DIR}:/certs:ro" \
+      moqdev/moq-relay:latest \
+      --listen '[::]:4443' \
+      --listen-tls-cert /certs/relay.pem --listen-tls-key /certs/relay.key \
+      --listen-tcp-bind '[::]:4444' \
+      --auth-public 'anon/**' \
+      --web-http-listen '[::]:8090' >"${MOQ_LOG}" 2>&1
+    RELAY_HOST="ts-moq-relay"
+    RELAY_CREATED=1
+    sleep 3
   fi
-  docker run -d --name ts-moq-relay --network "${DOCKER_NET}" \
-    -p 4444:4444 -p 8090:8090 \
-    -v "${CERT_DIR}:/certs:ro" \
-    moqdev/moq-relay:latest \
-    --listen '[::]:4443' \
-    --listen-tls-cert /certs/relay.pem --listen-tls-key /certs/relay.key \
-    --listen-tcp-bind '[::]:4444' \
-    --auth-public 'anon/**' \
-    --web-http-listen '[::]:8090' >"${MOQ_LOG}" 2>&1
-  sleep 3
 
-  log "Starting moq import srt listener on ${SRT_LISTEN_ADDR}..."
-  docker run -d --name ts-moq-import --network "${DOCKER_NET}" \
-    -p 8890:8890/udp \
-    moqdev/moq:latest \
-    --connect tcp://ts-moq-relay:4444/anon \
-    --broadcast "${MOQ_BROADCAST}" \
-    import srt --listen '[::]:8890' --latency "${SRT_LATENCY}" \
-    >>"${MOQ_LOG}" 2>&1
-  MOQ_PID="ts-moq-import"  # placeholder; cleanup usa docker rm
-  sleep 2
+  # Si ya hay un import SRT corriendo (moq-import), reutilizarlo también.
+  if docker ps --format '{{.Names}}' | grep -qE '^moq-import$'; then
+    log "Import SRT existente detectado (moq-import) — reutilizando."
+    IMPORT_CREATED=0
+  else
+    log "Starting moq import srt listener on ${SRT_LISTEN_ADDR}..."
+    docker run -d --name ts-moq-import --network "${DOCKER_NET}" \
+      -p 8890:8890/udp \
+      moqdev/moq:latest \
+      --connect "tcp://${RELAY_HOST}:4444/anon" \
+      --broadcast "${MOQ_BROADCAST}" \
+      import srt --listen '[::]:8890' --latency "${SRT_LATENCY}" \
+      >>"${MOQ_LOG}" 2>&1
+    IMPORT_CREATED=1
+    sleep 2
+  fi
+  MOQ_PID="ts-moq-import"
 
   sleep 1  # Dar tiempo a que se abra el socket
 
@@ -243,7 +260,7 @@ export_stream() {
   # Timeout para evitar bloqueos
   timeout "${EXPORT_DURATION_SEC}" docker run --rm --network teremoqwow-e2e \
     moqdev/moq:latest \
-    --connect tcp://ts-moq-relay:4444/anon \
+    --connect "tcp://${RELAY_HOST:-moq-relay}:4444/anon" \
     --broadcast "${MOQ_BROADCAST}" \
     export ts \
     >"${EXPORT_LOG}" 2>&1 || {
