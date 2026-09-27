@@ -1,0 +1,8 @@
+# Ignora certificados y claves reales. Generarlos localmente con los comandos de README.md.
+*.pem
+*.key
+*.jwk
+
+# Permite los archivos de estructura del repositorio.
+!README.md
+!.gitkeep
