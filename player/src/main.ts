@@ -37,6 +37,13 @@ function setupListeners() {
     }
   });
 
+  // Listen for ABR changes
+  player.addEventListener('moq:abr', (event: CustomEvent) => {
+    const { from, to, throughput_kbps } = event.detail;
+    console.info('[moq:abr]', `${from} → ${to} (${throughput_kbps.toFixed(2)} kbps)`);
+    updateAbrStatus(to, throughput_kbps);
+  });
+
   // Listen for errors
   player.addEventListener('moq:error', (event: CustomEvent) => {
     const { message } = event.detail;
@@ -56,4 +63,25 @@ function setupListeners() {
   });
 
   console.info('✅ teremoqwow Player Phase 0 initialized');
+}
+
+/**
+ * Actualiza el HUD con la rendition y throughput actual
+ */
+function updateAbrStatus(renditionName: string, throughputKbps: number) {
+  const abrStatus = document.getElementById('abr-status');
+  if (!abrStatus) return;
+
+  // Mapear nombre a símbolo legible
+  const symbols: Record<string, string> = {
+    'video-high': '📶 High',
+    'video-medium': '📶 Medium',
+    'video-low': '📶 Low',
+  };
+
+  const symbol = symbols[renditionName] || renditionName;
+  const mbps = (throughputKbps / 1000).toFixed(1);
+
+  abrStatus.textContent = `${symbol} · ${mbps} Mbps`;
+  abrStatus.className = `abr-status abr-${renditionName}`;
 }

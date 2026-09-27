@@ -104,6 +104,46 @@
         border-radius: 8px;
         margin-top: 1rem;
       }
+
+      .canvas-container {
+        position: relative;
+        display: inline-block;
+        width: 100%;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      #abr-status {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        z-index: 10;
+        min-width: 140px;
+        text-align: right;
+        backdrop-filter: blur(4px);
+      }
+
+      #abr-status.abr-video-high {
+        color: #4caf50;
+        border-left: 3px solid #4caf50;
+      }
+
+      #abr-status.abr-video-medium {
+        color: #ffc107;
+        border-left: 3px solid #ffc107;
+      }
+
+      #abr-status.abr-video-low {
+        color: #ff9800;
+        border-left: 3px solid #ff9800;
+      }
     </style>
   </head>
   <body>
@@ -127,7 +167,10 @@
         </p>
       </div>
 
-      <canvas id="moq-canvas" data-url="https://127.0.0.1:4443/anon" data-name="anon/live1" data-cert-hash=""></canvas>
+      <div class="canvas-container">
+        <canvas id="moq-canvas" data-url="https://127.0.0.1:4443/anon" data-name="anon/live1" data-cert-hash=""></canvas>
+        <div id="abr-status">-- · -- Mbps</div>
+      </div>
 
       <div class="stats" id="stats">
         <h3>📊 Estadísticas</h3>

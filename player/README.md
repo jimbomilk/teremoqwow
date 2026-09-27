@@ -4,9 +4,10 @@
 
 - **Agente responsable**: [Player & Overlay](../.github/agents/player-overlay.agent.md)
 - **Contratos**: [schemas/media/](../schemas/media/), [schemas/sync/](../schemas/sync/), [schemas/drm/](../schemas/drm/)
-- **Phase**: Phase 0 (Implementación en issue [#57](https://github.com/jimbomilk/teremoqwow/issues/57))
+- **Phase**: Phase 0-1 (Implementación en issues [#57](https://github.com/jimbomilk/teremoqwow/issues/57), [#60](https://github.com/jimbomilk/teremoqwow/issues/60))
 
-> ✅ **Fase 1**: Actualizado a `@moq/watch@0.6.1` con API real (`Watch.Player`, `Watch.Net.Connection`, `Watch.Net.Path`). Los imports dinámicos permiten modular el cargador de dependencias.
+> ✅ **Fase 1 - Actualización ABR**: Añadido controlador ABR con historial de 5 muestras, histeresis y selección automática de rendition (High/Medium/Low). Evento custom `moq:abr` + HUD con throughput estimado.
+> ✅ **Fase 1 - Dependencias**: Actualizado a `@moq/watch@0.6.1` con API real (`Watch.Player`, `Watch.Net.Connection`, `Watch.Net.Path`). Los imports dinámicos permiten modular el cargador de dependencias.
 
 ## Arquitectura
 
@@ -31,8 +32,9 @@
            └─ moq:ready
 ```
 
-## Phase 0 Scope
+## Phase 0-1 Scope
 
+**Phase 0** (Issue #57):
 - ✅ Web Component `<moq-watch>` con atributos `url`, `namespace`, `broadcast`
 - ✅ Suscripción a catálogo MoQ (`catalog.json`)
 - ✅ Selección de la primera rendition del selection_group `video-abr`
@@ -41,6 +43,14 @@
 - ✅ Cálculo de latencia glass-to-glass (PTS vs wallclock)
 - ✅ Eventos custom (`moq:latency`, `moq:error`, `moq:ready`)
 - ✅ UI básica con estadísticas en directo
+
+**Phase 1** (Issue #60):
+- ✅ Controlador ABR (`src/abr.ts`) con historial de throughput
+- ✅ Selección automática de rendition (video-high/medium/low)
+- ✅ Histeresis adaptativa (up: 3000ms, down: 1000ms)
+- ✅ Evento custom `moq:abr` con detalles de conmutación
+- ✅ HUD visual (#abr-status) con rendition y throughput estimado
+- ✅ Atributo `abr-window` configurable en Web Component
 
 ## Instalación y desarrollo
 
@@ -115,6 +125,86 @@ Luego, edita en `index.html`:
 
 El player validará el certificado contra el `cert-hash` usando `Watch.Net.Connection`.
 
+## Controlador ABR (Adaptive Bitrate)
+
+### Descripción
+
+El controlador ABR implementa selección automática de rendition basada en un historial de **5 muestras de throughput** (configurable) con lógica de **histeresis** para evitar "flapping" (cambios muy frecuentes).
+
+**Ubicación**: `src/abr.ts` (clase `AbrController`)
+
+### Cómo funciona
+
+1. **Muestreo de throughput**: Cada 2 segundos (aproximadamente, sincronizado con IDR frames de MoQ), se calcula el throughput actual en kbps y se añade al historial.
+
+2. **Media móvil**: Se calcula la media de las últimas N muestras (default: 5).
+
+3. **Selección de rendition**: Se elige la rendition óptima comparando el throughput suavizado con los umbrales definidos.
+
+4. **Histeresis**: 
+   - **Para subir** de calidad: el throughput debe estar por encima del threshold_up durante `hysteresisUp` ms (default: 3000ms).
+   - **Para bajar** de calidad: el throughput debe caer por debajo del threshold_down durante `hysteresisDown` ms (default: 1000ms).
+   - Esto previene cambios frecuentes y mejora la experiencia del usuario.
+
+5. **Conmutación en fronteras de grupo MoQ**: El cambio de rendition se produce en límites de grupo MoQ (frames IDR), típicamente cada 2 segundos en nuestra configuración, nunca a mitad de un segmento.
+
+### Renditions y umbrales (Fase 1)
+
+| Rendition | Bitrate | threshold_up | threshold_down |
+|-----------|---------|--------------|----------------|
+| `video-high` | 2500 kbps | 4000 kbps | 3500 kbps |
+| `video-medium` | 1200 kbps | 2500 kbps | 2000 kbps |
+| `video-low` | 600 kbps | 0 kbps | 0 kbps |
+
+**Notas**:
+- `video-low` nunca se abandona por debajo (es el fallback).
+- La selección comienza en `video-medium` por defecto.
+- Los umbrales se basan en simulaciones de Fase 0 y QoS budget en [qos/latency-budget.md](../qos/latency-budget.md).
+
+### Eventos y HUD
+
+El player emite un evento custom `moq:abr` cuando cambia la rendition:
+
+```typescript
+element.addEventListener('moq:abr', (event: CustomEvent) => {
+  const { from, to, throughput_kbps } = event.detail;
+  console.log(`ABR: ${from} → ${to} (${throughput_kbps} kbps)`);
+});
+```
+
+En `index.html`, existe un elemento `#abr-status` que muestra:
+- **Símbolo de calidad**: 📶 High / Medium / Low (con color según rendition)
+- **Throughput estimado**: en Mbps (ej: "4.2 Mbps")
+- **Posición**: top-right sobre el canvas, con fondo semi-transparente
+
+Ejemplo: `📶 High · 4.2 Mbps` (en verde para video-high)
+
+### Configuración en el Web Component
+
+Desde `index.html`, puedes configurar el tamaño de la ventana ABR:
+
+```html
+<moq-watch 
+  url="https://127.0.0.1:4443/anon" 
+  name="anon/live1" 
+  abr-window="5"
+  cert-hash="..."
+>
+</moq-watch>
+```
+
+- `abr-window`: número de muestras para la media móvil (default: 5).
+
+Los tiempos de histeresis (`hysteresisUp`, `hysteresisDown`) son constantes en código (3000ms y 1000ms respectivamente). Para cambiarlos, edita `src/moq-watch.ts` en el método `init()`.
+
+### Limitaciones y TODOs (Fase 1)
+
+- ⚠️ **Throughput estimado**: Actualmente se calcula a partir del bitrate de la rendition actual, no de datos reales del decoder. En Fase 2, integraremos eventos del decoder para muestreo real.
+- ⚠️ **API de conmutación**: `Watch.Player` v0.6.1 no expone API directa para cambiar rendition. En Fase 2, o bien:
+  - Esperamos una nueva versión de `@moq/watch` con API de track selection.
+  - O implementamos una suscripción paralela a múltiples tracks y switcheamos entre ellas.
+- ✅ **Histeresis adaptativa**: Implementada como timestamps, predecible.
+
 ## WebCodecs support
 
 El player requiere **WebCodecs** para decodificación:
@@ -132,17 +222,20 @@ Si WebCodecs no está disponible, el player emitirá un evento `moq:error`.
 - Latencia glass-to-glass
 - Estadísticas básicas
 
-### Phase 1: ABR Selector (Issue #58, est. 3pt)
-- UI para elegir High/Medium/Low
-- Cambio dinámico de track
-- QoS feedback
+### Phase 1: ABR Selector ✅ (Issue #60, Ola 2)
+- ✅ Controlador ABR con historial de throughput (5 muestras)
+- ✅ Selección automática High/Medium/Low según umbrales
+- ✅ Histeresis para evitar flapping
+- ✅ Evento custom `moq:abr` + HUD con throughput
+- ⏳ Integración real de datos de decoder (Fase 1b)
+- ⏳ API de conmutación de track en Watch.Player (pending v0.7.0)
 
 ### Phase 2: Overlays (Issue #59, est. 5pt)
 - iframe sandbox para overlays HTML5
 - OpenOverlay editor integration
 - Sincronización de eventos vs PTS
 
-### Phase 3: DRM & Monetización (Issue #60, est. 8pt)
+### Phase 3: DRM & Monetización (future)
 - Integración EZDRM
 - License requests
 - Stripe billing hooks
