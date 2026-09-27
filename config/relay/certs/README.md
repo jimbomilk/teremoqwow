@@ -38,6 +38,46 @@ openssl x509 -in config/relay/certs/relay.pem -noout -text | grep -A2 "Subject A
 
 ---
 
+### ⚠️ WebTransport exige validez ≤ 14 días
+
+**Chrome (y otros browsers que implementan WebTransport sobre HTTP/3) rechazan
+certificados autofirmados con validez superior a 14 días** cuando se usa
+`serverCertificateHashes` en el constructor `WebTransport`.
+El error que produce es `QUIC_TLS_CERTIFICATE_UNKNOWN` — verificado durante la
+validación E2E del 2026-09-27 (issue #116).
+
+Usa siempre `-days 14` para certificados de desarrollo WebTransport:
+
+```bash
+openssl req -x509 \
+  -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+  -keyout config/relay/certs/relay.key \
+  -out    config/relay/certs/relay.pem \
+  -days 14 \
+  -nodes \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+> **Automatiza la renovación** con `scripts/renew-dev-certs.sh`, que además
+> calcula e imprime el fingerprint y actualiza `.env.dev-cert`.
+
+#### Obtener el fingerprint SHA-256 para el player web
+
+El constructor `WebTransport` requiere el hash del cert en formato hex lowercase.
+Extráelo así:
+
+```bash
+openssl x509 -in config/relay/certs/relay.pem -noout -fingerprint -sha256 \
+  | tr -d ':' | awk -F= '{print tolower($2)}'
+```
+
+Copia el resultado en la variable `serverCertificateHashes` del player, o importa
+`.env.dev-cert` (generado por `renew-dev-certs.sh`) que ya lo contiene en
+`RELAY_CERT_SHA256`.
+
+---
+
 ## 2. Clave pública JWKS (`public.jwk`)
 
 El relay usa `public.jwk` para **verificar** los JWT Bearer de publishers y subscribers.

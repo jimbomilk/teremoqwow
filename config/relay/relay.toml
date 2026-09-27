@@ -1,35 +1,56 @@
-# relay.toml — Configuración del relay MoQ (moq-relay-ietf / moq-rs)
+# relay.toml — Configuración del relay MoQ (moq-relay 0.15.x)
 # Referencia: https://github.com/kixelated/moq-rs
+#
+# IMPORTANTE (issue #116): moq-relay 0.15.x lee flags CLI, no secciones TOML
+# estructuradas. Este fichero usa el formato plano (clave = valor) que el
+# binario acepta via --config. Verificado en la validación E2E 2026-09-27.
 #
 # Jerarquía: variable de entorno > este archivo > defaults del binario.
 # Nunca commitees certificados reales. Ver certs/README.md.
 
-# ── Servidor principal (QUIC sobre TLS) ───────────────────────────────────────
-[server]
-# Puerto de escucha MoQ/QUIC.
-# En dev usar :4443 si el usuario no tiene permisos para abrir :443 (< 1024).
-bind = ":443"
+# ── QUIC listener (MoQ/WebTransport) ─────────────────────────────────────────
+# Puerto estándar MoQ sobre QUIC+TLS. En Linux, puertos <1024 requieren
+# CAP_NET_BIND_SERVICE; usa 4443 para dev sin permisos de root.
+listen = "[::]:4443"
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
-[tls]
 # Rutas relativas al directorio de trabajo donde se lanza el binario.
-# Genera estos archivos con los comandos en certs/README.md; nunca los commitees.
-cert = "./certs/relay.pem"
-key  = "./certs/relay.key"
+# ⚠️  WebTransport (Chrome) exige validez ≤ 14 días cuando se usa
+#     serverCertificateHashes. Genera los certs con scripts/renew-dev-certs.sh.
+listen_tls_cert = "./certs/relay.pem"
+listen_tls_key  = "./certs/relay.key"
 
-# ── Servicio interno (health · métricas · admin) ──────────────────────────────
-[internal]
-# Expuesto solo en loopback. No debe ser accesible desde el exterior.
-bind = ":9101"
+# ── TCP listener qmux (fallback sin QUIC) ────────────────────────────────────
+# Necesario para clientes que no tienen acceso QUIC nativo, como entornos WSL2
+# donde el kernel de Windows bloquea UDP en ciertas configuraciones. El relay
+# tuneliza MoQ sobre TCP con encuadre qmux en este puerto.
+listen_tcp_bind = "[::]:4444"
 
-# ── Autenticación JWT ─────────────────────────────────────────────────────────
-[auth]
-# Clave pública JWKS del emisor de tokens (formato JWK RFC 7517).
-# El relay la usa para verificar el JWT Bearer de publishers y subscribers.
-# Genera public.jwk con los comandos de certs/README.md; nunca lo commitees.
-public_jwk = "./certs/public.jwk"
+# ── Autenticación ─────────────────────────────────────────────────────────────
+# Patrón glob de rutas que pueden publicarse/suscribirse sin JWT.
+# "anon/**" permite acceso anónimo completo (solo para dev/staging).
+# Para producción, reemplaza por un patrón más restrictivo o elimina esta línea
+# y configura JWT con auth_jwks_url / auth_jwks_file.
+auth_public = ["anon/**"]
+
+# ── HTTP debug (fingerprint · /announced) ────────────────────────────────────
+# Expone /fingerprint (hash SHA-256 del cert TLS) y /announced (tracks activos).
+# El player web lo usa para obtener el hash del cert sin intervención manual.
+web_http_listen = "[::]:8090"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-[log]
-level  = "info"
-format = "json"
+log_level = "info"
+
+# ── DEV OVERRIDE ──────────────────────────────────────────────────────────────
+# Para sobreescribir valores sin editar este fichero, exporta variables de
+# entorno con el prefijo MOQ_RELAY_ (kebab→SCREAMING_SNAKE, guiones→guiones bajos):
+#
+#   export MOQ_RELAY_LISTEN="[::]:4443"
+#   export MOQ_RELAY_LISTEN_TLS_CERT="/ruta/absoluta/relay.pem"
+#   export MOQ_RELAY_LISTEN_TLS_KEY="/ruta/absoluta/relay.key"
+#   export MOQ_RELAY_LISTEN_TCP_BIND="[::]:4444"
+#   export MOQ_RELAY_AUTH_PUBLIC="anon/**"
+#   export MOQ_RELAY_WEB_HTTP_LISTEN="[::]:8090"
+#   export MOQ_RELAY_LOG_LEVEL="debug"
+#
+# Útil en CI o cuando varios devs comparten la misma imagen Docker.

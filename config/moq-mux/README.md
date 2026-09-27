@@ -1,55 +1,41 @@
 # config/moq-mux/
 
-Configuración del pipeline de transcodificación ABR basado en **FFmpeg + moq-pub**
-(binario `moq-pub` del crate [`moq-rs`](https://github.com/kixelated/moq-rs),
-referido en la issue como *moq-mux*). Issue: [#56](https://github.com/jimbomilk/teremoqwow/issues/56).
+Configuración del pipeline de ingestión SRT basado en **`moq import srt` + FFmpeg**
+(CLI unificado [`moqdev/moq`](https://github.com/moqdev/moq) 0.12.7).
+Issue: [#56](https://github.com/jimbomilk/teremoqwow/issues/56) · [#116](https://github.com/jimbomilk/teremoqwow/issues/116).
+
+> **Cambio desde issue #116**: `moq-pub` como binario standalone no existe en
+> `moqdev/moq 0.12.7`. El subcomando `moq import srt --listen` reemplaza el pipe
+> `FFmpeg → moq-pub`. MediaMTX ya no es intermediario en este tramo.
 
 ---
 
 ## Objetivo
 
-Leer la señal ya ingestada por MediaMTX, transcodificarla a tres calidades de
-vídeo (High / Medium / Low) con GOP alineado cada 2 segundos y publicar los
-tracks en el relay MoQ para que el player pueda hacer ABR.
+Recibir señal SRT, publicarla en el relay MoQ bajo el namespace `anon/live1`
+para que el player pueda consumirla vía MoQ/QUIC.
+
+> **Namespace `anon/`**: el relay autoriza sin credenciales el subtree `anon/**`
+> (flag `--auth-public 'anon/**'` en `relay.toml`). **No usar** `teremoqwow/dev/live1`
+> como broadcast; ese subtree no está autorizado en modo público.
 
 ---
 
 ## Diagrama
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Broadcast                                                               │
-│  SRT source  ──SRT──▶  MediaMTX :8890                                   │
-│                        streamid=read:live-main                           │
-└────────────────────────────┬─────────────────────────────────────────────┘
-                             │  SRT (pull)
-                             ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  FFmpeg                                                                    │
-│                                                                            │
-│  -i srt://mediamtx:8890?streamid=read:live-main                           │
-│                                                                            │
-│  [0:v] split=3 ──▶ [v_high]  libx264  1920×1080  3000 kbps  Main@L4.0   │
-│                ├──▶ [v_med]  libx264  1280×720   2000 kbps  Main@L3.1   │
-│                └──▶ [v_low]  libx264   854×480   1000 kbps  Main@L3.0   │
-│  [0:a]         ──▶           AAC-LC   48 kHz      128 kbps  stereo      │
-│                                                                            │
-│  Salida: MPEG-TS multiprograma → stdout (pipe)                            │
-└────────────────────────────┬─────────────────────────────────────────────┘
-                             │  pipe (stdin)
-                             ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  moq-pub                                                                 │
-│  --url https://relay:4443                                                │
-│  --namespace teremoqwow/dev/live1                                        │
-│                                                                          │
-│  Publica un track MoQ por PID MPEG-TS:                                  │
-│    video-high  · video-medium  · video-low  · audio-main                │
-│    (+ tracks *.init con el init segment de cada uno)                    │
-└────────────────────────────┬─────────────────────────────────────────────┘
-                             │  MoQ / QUIC
-                             ▼
-                    relay:4443  (moq-relay de moq-rs)
+  SRT source (broadcast encoder o FFmpeg dev/test)
+        │  SRT publish → srt://127.0.0.1:8890?streamid=publish:live1
+        ▼
+┌──────────────────────────────────────────────────┐
+│  moq import srt                                  │
+│  --listen [::]:8890  --latency 200ms             │
+│  --connect tcp://relay:4444/anon                 │
+│  --broadcast anon/live1                          │
+└─────────────────────────┬────────────────────────┘
+                          │  MoQ / TCP (QUIC en prod)
+                          ▼
+                 relay:4444  (moqdev/moq relay)
 ```
 
 ---
@@ -58,11 +44,8 @@ tracks en el relay MoQ para que el player pueda hacer ABR.
 
 | Componente | Versión mínima | Notas |
 |---|---|---|
-| FFmpeg | 6.0 | Con `libx264`, `libsrt`, `libopus` |
-| moq-pub | git main | `cargo install --git https://github.com/kixelated/moq-rs moq-pub` |
-| Rust toolchain | 1.75 | Para compilar moq-pub |
-
-> moq-rs no publica imágenes Docker oficiales. Ver sección [Levantar con Docker](#levantar-con-docker).
+| FFmpeg | 6.0 | Con `libx264`, `libsrt`, `libaac` |
+| moq CLI | 0.12.7 | `moqdev/moq` — subcomando `import srt` |
 
 ---
 
@@ -70,67 +53,49 @@ tracks en el relay MoQ para que el player pueda hacer ABR.
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `MOQ_RELAY_URL` | `https://relay:4443` | URL QUIC del relay MoQ |
-| `MOQ_NAMESPACE` | `teremoqwow/dev/live1` | Namespace MoQ del broadcast |
-| `SRT_SOURCE` | `srt://mediamtx:8890?streamid=read:live-main` | URL SRT de MediaMTX |
-| `FRAMERATE` | `30` | Framerate del source (determina `GOP_FRAMES = FRAMERATE × 2`) |
-| `MOQ_JWT_TOKEN` | _(vacío)_ | Bearer JWT para autenticar con el relay. **Nunca hardcodear.** |
-| `MOQ_INSECURE` | `true` | Omitir verificación TLS en dev (certs auto-firmados) |
+| `MOQ_RELAY_TCP` | `tcp://relay:4444/anon` | Endpoint TCP del relay MoQ |
+| `MOQ_BROADCAST` | `anon/live1` | Broadcast path (debe estar bajo `anon/**`) |
+| `SRT_LISTEN_ADDR` | `[::]:8890` | Dirección en la que el listener SRT escucha |
+| `SRT_LATENCY` | `200ms` | Latencia SRT del listener |
 
 ---
 
 ## Levantar el pipeline
 
-### Con cargo (desarrollo local)
-
 ```bash
-# 1. Compilar moq-pub (sólo la primera vez)
-cargo install --git https://github.com/kixelated/moq-rs --bin moq-pub
+# Arrancar listener SRT + FFmpeg de prueba (fuente sintética dev/test):
+bash config/moq-mux/run.sh
 
-# 2. Arrancar el pipeline
-cd /path/to/teremoqwow
+# O con variables personalizadas (source SRT externo en producción):
+MOQ_RELAY_TCP=tcp://relay:4444/anon \
+MOQ_BROADCAST=anon/live1 \
+SRT_LISTEN_ADDR=[::]:8890 \
+SRT_LATENCY=200ms \
 bash config/moq-mux/run.sh
 ```
 
-### Con cargo run desde el repo moq-rs
+El script:
+1. Arranca `moq import srt --listen` en background como receptor SRT.
+2. Arranca FFmpeg (fuente sintética en dev; source SRT externo en prod) que publica en ese listener.
+3. Registra un trap SIGTERM/SIGINT para terminar ambos procesos limpiamente.
 
-```bash
-# Dentro del repo clonado de moq-rs:
-ffmpeg ... -f mpegts pipe:1 \
-| cargo run --bin moq-pub -- \
-    --url https://relay:4443 \
-    --namespace teremoqwow/dev/live1 \
-    --insecure
-```
-
-### Levantar con Docker
-
-No existe imagen oficial. Construir localmente:
+### Con Docker
 
 ```dockerfile
-# Dockerfile.moq-pub  (en el repo moq-rs clonado)
-FROM rust:1.75-slim AS builder
-RUN apt-get update && apt-get install -y pkg-config libssl-dev
-WORKDIR /build
-COPY . .
-RUN cargo build --release --bin moq-pub
-
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ffmpeg libssl3 && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /build/target/release/moq-pub /usr/local/bin/moq-pub
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+COPY --from=moqdev/moq:0.12.7 /usr/local/bin/moq /usr/local/bin/moq
 COPY config/moq-mux/run.sh /run.sh
 ENTRYPOINT ["bash", "/run.sh"]
 ```
 
 ```bash
-docker build -f Dockerfile.moq-pub -t teremoqwow/moq-pub:local .
 docker run --rm \
-  -e MOQ_RELAY_URL=https://relay:4443 \
-  -e MOQ_NAMESPACE=teremoqwow/dev/live1 \
-  -e SRT_SOURCE="srt://mediamtx:8890?streamid=read:live-main" \
-  -e MOQ_INSECURE=true \
+  -e MOQ_RELAY_TCP=tcp://relay:4444/anon \
+  -e MOQ_BROADCAST=anon/live1 \
+  -p 8890:8890/udp \
   --network teremoqwow_net \
-  teremoqwow/moq-pub:local
+  teremoqwow/moq-import:local
 ```
 
 ---
@@ -170,11 +135,10 @@ Tras levantar el pipeline, comprobar que los keyframes están alineados entre
 renditions y que la latencia extremo-a-extremo es ≤ objetivo:
 
 ```bash
-# Inspeccionar keyframes de cada rendition desde el source SRT reencaminado
-# (requiere acceso al MPEG-TS multiplexado, p.ej. via tee en run.sh):
+# Inspeccionar keyframes desde el listener SRT local (dev/test):
 ffprobe -v quiet -select_streams v:0 \
   -show_frames -of csv \
-  -i srt://mediamtx:8890?streamid=read:live-main \
+  -i "srt://127.0.0.1:8890?streamid=read:live1" \
   | grep -w 1 | head -20
 # key_frame=1 debe aparecer cada ~60 frames (2 s a 30 fps).
 
@@ -192,10 +156,10 @@ ffprobe -v quiet -select_streams v:0 \
 
 | Decisión | Elección | Razón |
 |---|---|---|
-| Transporte FFmpeg → moq-pub | **pipe** (stdout → stdin) | Sin puerto TCP extra; SIGPIPE propaga fallos; kernel gestiona buffering |
-| Audio compartido vs replicado | **Un único track AAC** | CPU y ancho de banda mínimos; el player ABR siempre usa el mismo track de audio |
-| Framerate de source variable | Conversión CFR con `-r` | Garantiza `-g` exacto y `force_key_frames` precisos aunque el source sea VFR |
-| Config TOML vs script | **run.sh** | moq-pub no acepta config TOML (usa flags CLI); script parametrizable por env vars |
+| Ingestión SRT | **`moq import srt --listen`** | `moq-pub` no existe en `moqdev/moq 0.12.7`; el subcomando unificado elimina MediaMTX como intermediario |
+| Namespace | **`anon/live1`** | El relay autoriza `anon/**` sin credenciales; otros subtrees requieren auth explícita |
+| Source en dev/test | FFmpeg `testsrc2 + sine` | Fuente sintética reproducible; en prod sustituir por source SRT externo |
+| Config TOML vs script | **run.sh** | `moq` no acepta config TOML; script parametrizable por env vars |
 
 ---
 
@@ -203,6 +167,6 @@ ffprobe -v quiet -select_streams v:0 \
 
 | Fichero | Descripción |
 |---|---|
-| `run.sh` | Pipeline completo FFmpeg → moq-pub, parametrizado por env vars |
-| `example-catalog.json` | Catálogo MoQ de referencia con los 4 tracks esperados (3 vídeo + 1 audio) |
+| `run.sh` | Listener `moq import srt` + FFmpeg de prueba, parametrizado por env vars |
+| `example-catalog.json` | Catálogo MoQ de referencia con los tracks esperados |
 | `README.md` | Este documento |

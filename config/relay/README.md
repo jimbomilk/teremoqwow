@@ -69,15 +69,27 @@ Ver instrucciones completas (incluyendo `public.jwk`) en [certs/README.md](certs
 
 ---
 
+## Listener TCP qmux (`:4444`)
+
+El relay escucha también en TCP en el puerto `4444` usando el protocolo **qmux**,
+que encapsula MoQ sobre TCP para entornos donde UDP/QUIC no está disponible.
+Esto es especialmente necesario en **WSL2**: el kernel de Windows puede bloquear
+tráfico UDP en ciertas configuraciones de red, haciendo que el listener QUIC
+(`:4443`) sea inaccesible desde el host o desde el browser. Con qmux, los clientes
+que detecten que QUIC falla pueden reconectarse por TCP sin perder funcionalidad.
+Activa este fallback configurando `listen_tcp_bind` en `relay.toml`.
+
+---
+
 ## Verificar el health endpoint
 
 Una vez el relay esté en marcha, verifica que responde:
 
 ```bash
-curl -k https://127.0.0.1:9101/health
+curl http://127.0.0.1:8090/announced
 ```
 
-Respuesta esperada: HTTP `200 OK` con body `ok` o JSON `{"status":"ok"}`.
+Respuesta esperada: lista JSON de tracks anunciados actualmente (vacía si no hay publishers).
 
 > `-k` omite la verificación del certificado autofirmado. No usar en producción.
 
