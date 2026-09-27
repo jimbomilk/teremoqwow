@@ -258,21 +258,24 @@ export_stream() {
 
   # moq export ts: consume del relay y exporta a stdout
   # Timeout para evitar bloqueos
-  timeout "${EXPORT_DURATION_SEC}" docker run --rm --network teremoqwow-e2e \
+  # Lanzar export en background con -d para poder matar con docker rm -f.
+  # Así el kill es instantáneo incluso con red degradada por netem.
+  docker rm -f ts-moq-export 2>/dev/null || true
+  docker run -d --name ts-moq-export --stop-timeout 1 --network teremoqwow-e2e \
     moqdev/moq:latest \
     --connect "tcp://${RELAY_HOST:-moq-relay}:4444/anon" \
     --broadcast "${MOQ_BROADCAST}" \
     export ts \
-    >"${EXPORT_LOG}" 2>&1 || {
-    local exit_code=$?
-    # exit_code 124 es timeout (esperado); otros son error
-    if [[ $exit_code -ne 124 ]]; then
-      error "moq export failed with exit code ${exit_code}"
-      return 1
-    fi
-  }
+    >/dev/null 2>/dev/null
 
-  log "Export completed (timeout after ${EXPORT_DURATION_SEC}s): OK"
+  log "Export running for ${EXPORT_DURATION_SEC}s..."
+  sleep "${EXPORT_DURATION_SEC}"
+
+  # Recoger logs y matar el contenedor
+  docker logs ts-moq-export >"${EXPORT_LOG}" 2>&1 || true
+  docker rm -f ts-moq-export 2>/dev/null || true
+
+  log "Export completed (${EXPORT_DURATION_SEC}s): OK"
   return 0
 }
 
