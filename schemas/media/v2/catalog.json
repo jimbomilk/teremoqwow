@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/media/v2/catalog.json",
+  "title": "HangCatalog",
+  "description": "Catálogo MoQ en formato 'hang' tal y como lo publica moq-relay 0.15.x / moq-cli 0.12.x. Difiere del v1 propio (tracks como array) en que usa renditions como diccionario con nombres PID (0.avc3, 1.aac). Verificado capturando `moq fetch catalog.json` en E2E real (ver qos/reports/2026-09-27-fase0-e2e.md).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["video", "clock"],
+  "properties": {
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renditions"],
+      "properties": {
+        "renditions": {
+          "type": "object",
+          "description": "Diccionario de renditions de vídeo. Claves = nombre del track (p.ej. '0.avc3').",
+          "additionalProperties": { "$ref": "#/$defs/videoRendition" }
+        }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "renditions": {
+          "type": "object",
+          "description": "Diccionario de renditions de audio. Claves = nombre del track (p.ej. '1.aac').",
+          "additionalProperties": { "$ref": "#/$defs/audioRendition" }
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall", "timescale"],
+      "description": "Reloj wallclock del productor al inicio del broadcast.",
+      "properties": {
+        "wall": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tiempo desde epoch UNIX en unidades de `timescale`."
+        },
+        "timescale": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Divisor para convertir `wall` a segundos. Típicamente 1000000 (microsegundos)."
+        }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "track": {
+          "type": "string",
+          "description": "Nombre del track de timeline (p.ej. 'timeline.z')."
+        },
+        "timescale": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timescale del track de archivo (típicamente 1000 = ms)."
+        }
+      }
+    },
+    "mpegts": {
+      "type": "object",
+      "description": "Metadatos MPEG-TS del stream de origen (PIDs, programa, SI tables).",
+      "additionalProperties": true,
+      "properties": {
+        "tracks": {
+          "type": "object",
+          "description": "Mapa track-name → PID.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": { "pid": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "program": {
+          "type": "object",
+          "properties": {
+            "transportStreamId": { "type": "integer" },
+            "programNumber":     { "type": "integer" },
+            "pmtPid":            { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["legacy", "cmaf"],
+          "description": "'legacy' = varint-timestamp + raw bitstream; 'cmaf' = fMP4."
+        }
+      }
+    },
+    "videoRendition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["codec"],
+      "properties": {
+        "codec":       { "type": "string", "description": "MIME con parámetros RFC 6381 (p.ej. 'avc3.42c01e')." },
+        "codedWidth":  { "type": "integer", "minimum": 1 },
+        "codedHeight": { "type": "integer", "minimum": 1 },
+        "bitrate":     { "type": "integer", "minimum": 0 },
+        "container":   { "$ref": "#/$defs/container" }
+      }
+    },
+    "audioRendition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["codec"],
+      "properties": {
+        "codec":            { "type": "string" },
+        "sampleRate":       { "type": "integer", "minimum": 1 },
+        "numberOfChannels": { "type": "integer", "minimum": 1 },
+        "bitrate":          { "type": "integer", "minimum": 0 },
+        "container":        { "$ref": "#/$defs/container" },
+        "jitter":           { "type": "integer", "minimum": 0, "description": "Jitter del buffer de audio en ms." }
+      }
+    }
+  }
+}

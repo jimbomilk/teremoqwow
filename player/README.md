@@ -6,7 +6,7 @@
 - **Contratos**: [schemas/media/](../schemas/media/), [schemas/sync/](../schemas/sync/), [schemas/drm/](../schemas/drm/)
 - **Phase**: Phase 0 (Implementación en issue [#57](https://github.com/jimbomilk/teremoqwow/issues/57))
 
-> **TODO Fase 0.1**: la dependencia `@kixelated/moq` se declara como estándar de facto; verificar el paquete real y su API (`MoQClient`, suscripción a catálogo) antes de `npm install`. Si el nombre/versión del cliente MoQ para JS/TS difiere, ajustar `package.json` y los imports en `src/moq-watch.ts`.
+> ✅ **Fase 1**: Actualizado a `@moq/watch@0.6.1` con API real (`Watch.Player`, `Watch.Net.Connection`, `Watch.Net.Path`). Los imports dinámicos permiten modular el cargador de dependencias.
 
 ## Arquitectura
 
@@ -88,9 +88,32 @@ npm run preview
 
 | Paquete | Versión | Rol |
 |---------|---------|-----|
-| `@kixelated/moq` | `^0.2.0` | Cliente MoQ (suscripción a tracks) |
+| `@moq/watch` | `^0.6.1` | Player headless + API `Watch.Player`, `Watch.Net.Connection` |
+| `@moq/signals` | `^0.2.5` | Reactive signals (`Signal`) para propiedades mutables |
 | `typescript` | `^5.3.3` | Lenguaje |
 | `vite` | `^5.0.8` | Build tool |
+
+## Certificado autofirmado de dev (WebTransport)
+
+Para conectarse al relay de desarrollo con cert autofirmado, obtén el SHA-256 fingerprint:
+
+```bash
+openssl x509 -in config/relay/certs/relay.pem -noout -fingerprint -sha256 | tr -d ':' | awk -F= '{print tolower($2)}'
+```
+
+Luego, edita en `index.html`:
+
+```html
+<canvas 
+  id="moq-canvas" 
+  data-url="https://127.0.0.1:4443/anon" 
+  data-name="anon/live1" 
+  data-cert-hash="<AQUÍ-PEGA-EL-HASH>"
+>
+</canvas>
+```
+
+El player validará el certificado contra el `cert-hash` usando `Watch.Net.Connection`.
 
 ## WebCodecs support
 

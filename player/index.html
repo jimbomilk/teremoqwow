@@ -47,15 +47,17 @@
         font-family: 'Courier New', monospace;
       }
 
-      moq-watch {
+      #moq-canvas {
         display: block;
         width: 100%;
         max-width: 960px;
+        height: auto;
         margin: 0 auto;
         border: 2px solid #444;
         border-radius: 8px;
         overflow: hidden;
         background: #000;
+        aspect-ratio: 16 / 9;
       }
 
       .stats {
@@ -110,22 +112,22 @@
 
       <div class="info">
         <p>
-          <strong>URL:</strong> <code>https://relay:4443</code>
+          <strong>Relay URL:</strong> <code>https://127.0.0.1:4443/anon</code> (editar en datos-url)
         </p>
         <p>
-          <strong>Namespace:</strong> <code>teremoqwow/dev/live1</code>
+          <strong>Broadcast name:</strong> <code>anon/live1</code> (editar en datos-name)
         </p>
         <p>
-          <strong>Broadcast:</strong> <code>video-high</code> (Phase 0: primera rendition del
-          selection_group <code>video-abr</code>)
+          <strong>WebTransport cert-hash (SHA-256):</strong> <code id="cert-hash-display">vacío</code>
+        </p>
+        <p style="margin-top: 0.75rem; font-size: 0.85rem; color: #bbb;">
+          💡 Para obtener el cert-hash del relay de dev autofirmado:
+          <br />
+          <code style="font-size: 0.8rem;">openssl x509 -in config/relay/certs/relay.pem -noout -fingerprint -sha256 | tr -d ':' | awk -F= '{print tolower($2)}'</code>
         </p>
       </div>
 
-      <moq-watch
-        url="https://relay:4443"
-        namespace="teremoqwow/dev/live1"
-        broadcast="video-high"
-      ></moq-watch>
+      <canvas id="moq-canvas" data-url="https://127.0.0.1:4443/anon" data-name="anon/live1" data-cert-hash=""></canvas>
 
       <div class="stats" id="stats">
         <h3>📊 Estadísticas</h3>
@@ -150,6 +152,52 @@
       <div id="error-container"></div>
     </div>
 
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module">
+      import { MoQWatch } from './src/moq-watch.ts';
+
+      // Obtener canvas y atributos
+      const canvas = document.getElementById('moq-canvas') as HTMLCanvasElement;
+      const url = canvas?.getAttribute('data-url') || 'https://127.0.0.1:4443/anon';
+      const name = canvas?.getAttribute('data-name') || 'anon/live1';
+      const certHash = canvas?.getAttribute('data-cert-hash') || '';
+
+      // Actualizar display del cert-hash
+      const certHashDisplay = document.getElementById('cert-hash-display');
+      if (certHashDisplay) {
+        certHashDisplay.textContent = certHash || '(no configurado, usando WebTransport sin validación)';
+      }
+
+      // Crear instancia de MoQWatch y asignar atributos
+      const player = new MoQWatch();
+      player.setAttribute('url', url);
+      player.setAttribute('name', name);
+      if (certHash) {
+        player.setAttribute('cert-hash', certHash);
+      }
+
+      // Reemplazar el canvas por el componente
+      canvas?.replaceWith(player);
+
+      // Escuchar eventos
+      player.addEventListener('moq:ready', (event: CustomEvent) => {
+        console.log('[Player] Ready:', event.detail);
+        const statusEl = document.getElementById('status');
+        if (statusEl) statusEl.textContent = 'Conectado';
+      });
+
+      player.addEventListener('moq:error', (event: CustomEvent) => {
+        console.error('[Player] Error:', event.detail.message);
+        const statusEl = document.getElementById('status');
+        if (statusEl) statusEl.textContent = `Error: ${event.detail.message}`;
+        
+        const errorContainer = document.getElementById('error-container');
+        if (errorContainer) {
+          const errorEl = document.createElement('div');
+          errorEl.className = 'error';
+          errorEl.textContent = `⚠️ ${event.detail.message}`;
+          errorContainer.appendChild(errorEl);
+        }
+      });
+    </script>
   </body>
 </html>

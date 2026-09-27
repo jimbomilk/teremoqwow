@@ -1,55 +1,25 @@
-import { MoQClient } from '@kixelated/moq';
 import { estimateNTPOffset, calculateLatency, formatLatency } from './latency';
 
 /**
- * Catalog shape validation
- */
-interface CatalogTrack {
-  name: string;
-  kind: 'video' | 'audio' | 'data' | 'sync';
-  codec: string;
-  init_track: string;
-  bitrate_kbps?: number;
-  width?: number;
-  height?: number;
-  framerate?: number;
-  channels?: number;
-  sample_rate_hz?: number;
-  language?: string;
-  role?: string;
-  selection_group?: string;
-}
-
-interface Catalog {
-  version: number;
-  namespace: string;
-  created_at?: {
-    wallclock_ns: number;
-    source: string;
-  };
-  tracks: CatalogTrack[];
-}
-
-/**
- * moq-watch Web Component
+ * moq-watch Web Component (Headless Player)
+ *
+ * Implementa la API real de @moq/watch@0.6.1 con Watch.Player + Watch.Net.Connection
  *
  * Attributes:
- *   - url: MoQ relay URL (e.g., "https://relay:4443")
- *   - namespace: MoQ namespace (e.g., "teremoqwow/dev/live1")
- *   - broadcast: Track name to play (e.g., "video-high")
+ *   - url: MoQ relay URL (default: "https://127.0.0.1:4443/anon")
+ *   - name: Broadcast name (default: "anon/live1")
+ *   - cert-hash: SHA-256 hex del cert del relay (opcional, para WebTransport self-signed)
  *
  * Events:
- *   - moq:latency: {latency_ms, pts_ms, render_ts_ms}
- *   - moq:error: {message}
+ *   - moq:ready: cuando el player está listo
+ *   - moq:error: {message} cuando ocurre un error
+ *   - moq:latency: {latency_ms, pts_ms, render_ts_ms, ntp_offset_ms}
  */
 export class MoQWatch extends HTMLElement {
   private canvas: HTMLCanvasElement | null = null;
-  private ctx: CanvasRenderingContext2D | null = null;
-  private moq: MoQClient | null = null;
-  private decoder: VideoDecoder | null = null;
-  private ntpOffset: number = 0;
+  private connection: any = null; // Watch.Net.Connection
+  private player: any = null; // Watch.Player
   private frameCount: number = 0;
-  private selectedTrack: CatalogTrack | null = null;
 
   constructor() {
     super();
@@ -81,6 +51,7 @@ export class MoQWatch extends HTMLElement {
           width: 100%;
           height: 100%;
           display: block;
+          object-fit: contain;
         }
       </style>
       <canvas></canvas>
@@ -90,252 +61,85 @@ export class MoQWatch extends HTMLElement {
 
   private async init() {
     try {
-      const url = this.getAttribute('url');
-      const namespace = this.getAttribute('namespace');
-      const broadcast = this.getAttribute('broadcast');
+      // Cargar dinámicamente @moq/watch y @moq/signals
+      const Watch = await import('@moq/watch');
+      const Signals = await import('@moq/signals');
 
-      if (!url || !namespace || !broadcast) {
-        throw new Error('Missing required attributes: url, namespace, broadcast');
+      const url = this.getAttribute('url') || 'https://127.0.0.1:4443/anon';
+      const name = this.getAttribute('name') || 'anon/live1';
+      const certHash = this.getAttribute('cert-hash');
+
+      if (!this.canvas) {
+        throw new Error('Canvas element not found in shadow DOM');
       }
 
-      // Initialize MoQ client
-      this.moq = new MoQClient(url);
-      await this.moq.connect();
+      // Configurar Watch.Net.Connection con serverCertificateHashes si cert-hash está presente
+      const connectionConfig: any = {
+        url: new URL(url),
+        enabled: true,
+        webtransport: {
+          serverCertificateHashes: certHash
+            ? [
+                {
+                  algorithm: 'sha-256',
+                  value: certHash, // Hex string del SHA-256
+                },
+              ]
+            : [],
+        },
+        websocket: { enabled: false },
+      };
 
-      this.emit('moq:status', { status: 'connected' });
+      // Crear conexión
+      this.connection = new Watch.Net.Connection(connectionConfig);
 
-      // Subscribe to catalog
-      const catalog = await this.fetchCatalog(namespace);
-      this.validateCatalog(catalog);
+      // Crear player headless (sin custom element, solo API)
+      this.player = new Watch.Player({
+        origin: this.connection.origin,
+        probe: this.connection.probe,
+        name: Watch.Net.Path.from(name),
+        canvas: this.canvas,
+        muted: new Signals.Signal(true),
+        delay: 'auto',
+        visible: 'always',
+      });
 
-      // Find the track to play
-      this.selectedTrack = catalog.tracks.find(
-        (t) => t.name === broadcast && t.kind === 'video'
+      // Emitir evento de ready
+      this.dispatchEvent(
+        new CustomEvent('moq:ready', {
+          detail: { url, name, frameCount: this.frameCount },
+          bubbles: true,
+        })
       );
 
-      if (!this.selectedTrack) {
-        throw new Error(
-          `Track "${broadcast}" not found or not a video track in catalog`
-        );
-      }
-
-      // Initialize NTP offset if available
-      if (catalog.created_at?.wallclock_ns) {
-        this.ntpOffset = estimateNTPOffset(catalog.created_at.wallclock_ns);
-      }
-
-      // Initialize VideoDecoder
-      await this.initDecoder(this.selectedTrack);
-
-      // Subscribe to init track + main track
-      await this.subscribeToTracks(namespace, this.selectedTrack);
-
-      this.emit('moq:ready', { track: this.selectedTrack.name });
+      this.frameCount++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.emitError(message);
-    }
-  }
-
-  private async fetchCatalog(namespace: string): Promise<Catalog> {
-    if (!this.moq) throw new Error('MoQ client not initialized');
-
-    // Subscribe to the "catalog" object in the namespace
-    // MoQ catalog is typically at {namespace}/catalog
-    const catalogPath = `${namespace}/catalog`;
-
-    // Read the catalog from the namespace
-    // Using MoQ's subscription mechanism
-    const subscription = await this.moq.subscribe(catalogPath, {
-      start_object: 0,
-    });
-
-    // Collect all data from the catalog object
-    let catalogData = '';
-    for await (const data of subscription.reader) {
-      if (typeof data === 'string') {
-        catalogData += data;
-      } else if (data instanceof Uint8Array) {
-        catalogData += new TextDecoder().decode(data);
-      }
-    }
-
-    return JSON.parse(catalogData) as Catalog;
-  }
-
-  private validateCatalog(catalog: unknown): asserts catalog is Catalog {
-    const cat = catalog as Catalog;
-    if (!cat.version || cat.version !== 1) {
-      throw new Error('Invalid catalog version');
-    }
-    if (!cat.namespace || typeof cat.namespace !== 'string') {
-      throw new Error('Missing catalog namespace');
-    }
-    if (!Array.isArray(cat.tracks) || cat.tracks.length === 0) {
-      throw new Error('Invalid or empty catalog tracks');
-    }
-  }
-
-  private async initDecoder(track: CatalogTrack) {
-    if (!this.canvas) {
-      throw new Error('Canvas not initialized');
-    }
-
-    // Check if VideoDecoder is available
-    if (!('VideoDecoder' in window)) {
-      throw new Error('WebCodecs VideoDecoder not supported in this browser');
-    }
-
-    const config: VideoDecoderConfig = {
-      codec: track.codec,
-      width: track.width || 1920,
-      height: track.height || 1080,
-      optimizeForLatency: true,
-    };
-
-    // Verify codec support
-    const support = await VideoDecoder.isConfigSupported(config);
-    if (!support.supported) {
-      throw new Error(
-        `Codec ${track.codec} not supported. Supported configs: ${JSON.stringify(support.supported)}`
+      console.error('[MoQWatch] Error:', message);
+      this.dispatchEvent(
+        new CustomEvent('moq:error', {
+          detail: { message },
+          bubbles: true,
+        })
       );
     }
-
-    this.decoder = new VideoDecoder({
-      output: (frame: VideoFrame) => {
-        this.renderFrame(frame, track);
-      },
-      error: (error: DOMException) => {
-        this.emitError(`Decoder error: ${error.message}`);
-      },
-    });
-
-    this.decoder.configure(config);
-  }
-
-  private async subscribeToTracks(namespace: string, track: CatalogTrack) {
-    if (!this.moq) throw new Error('MoQ client not initialized');
-
-    // Subscribe to init track first to get codec parameters
-    const initTrackPath = `${namespace}/${track.init_track}`;
-    const initSubscription = await this.moq.subscribe(initTrackPath, {
-      start_object: 0,
-    });
-
-    for await (const data of initSubscription.reader) {
-      if (this.decoder) {
-        // Enqueue init segment to decoder
-        const chunk = new EncodedVideoChunk({
-          type: 'key',
-          timestamp: 0,
-          data: data instanceof Uint8Array ? data : new TextEncoder().encode(String(data)),
-        });
-        this.decoder.decode(chunk);
-      }
-    }
-
-    // Subscribe to main video track
-    const videoTrackPath = `${namespace}/${track.name}`;
-    const videoSubscription = await this.moq.subscribe(videoTrackPath, {
-      start_object: 0,
-    });
-
-    // Decode video chunks as they arrive
-    for await (const chunk of videoSubscription.reader) {
-      if (this.decoder) {
-        try {
-          const buffer =
-            chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(String(chunk));
-
-          // Try to extract timestamp from chunk (MoQ provides in metadata)
-          // For now, use current time as approximation
-          const timestamp = performance.now() * 1000; // Convert to microseconds
-
-          const encodedChunk = new EncodedVideoChunk({
-            type: 'delta',
-            timestamp,
-            data: buffer,
-          });
-          this.decoder.decode(encodedChunk);
-        } catch (err) {
-          this.emitError(`Failed to decode chunk: ${err}`);
-        }
-      }
-    }
-  }
-
-  private renderFrame(frame: VideoFrame, track: CatalogTrack) {
-    if (!this.canvas || !this.ctx) {
-      this.ctx = this.canvas?.getContext('2d');
-      if (!this.ctx) {
-        this.emitError('Failed to get canvas context');
-        return;
-      }
-    }
-
-    // Resize canvas to match frame dimensions if needed
-    if (this.canvas.width !== frame.codedWidth || this.canvas.height !== frame.codedHeight) {
-      this.canvas.width = frame.codedWidth;
-      this.canvas.height = frame.codedHeight;
-    }
-
-    // Draw frame on canvas
-    this.ctx.drawImage(frame as any, 0, 0);
-    frame.close();
-
-    this.frameCount++;
-
-    // Emit latency event
-    if (frame.timestamp !== undefined) {
-      const latencyMetrics = calculateLatency(frame.timestamp, this.ntpOffset);
-      this.emit('moq:latency', latencyMetrics);
-      this.updateStats(latencyMetrics, track);
-    }
-  }
-
-  private updateStats(latencyMetrics: any, track: CatalogTrack) {
-    const statusEl = document.getElementById('status');
-    const latencyEl = document.getElementById('latency');
-    const framesEl = document.getElementById('frames');
-    const codecEl = document.getElementById('codec');
-
-    if (statusEl) statusEl.textContent = 'Reproduciendo';
-    if (latencyEl) latencyEl.textContent = formatLatency(latencyMetrics.latency_ms);
-    if (framesEl) framesEl.textContent = String(this.frameCount);
-    if (codecEl) codecEl.textContent = track.codec;
   }
 
   private cleanup() {
-    if (this.decoder) {
-      this.decoder.close();
-      this.decoder = null;
+    try {
+      if (this.player) {
+        this.player.close();
+        this.player = null;
+      }
+      if (this.connection) {
+        this.connection.close();
+        this.connection = null;
+      }
+    } catch (error) {
+      console.error('[MoQWatch] Error during cleanup:', error);
     }
-    if (this.moq) {
-      this.moq.close();
-      this.moq = null;
-    }
-  }
-
-  private emit(eventName: string, detail: any) {
-    this.dispatchEvent(new CustomEvent(eventName, { detail }));
-  }
-
-  private emitError(message: string) {
-    this.emit('moq:error', { message });
-
-    // Update UI
-    const errorContainer = document.getElementById('error-container');
-    if (errorContainer) {
-      const errorEl = document.createElement('div');
-      errorEl.className = 'error';
-      errorEl.textContent = `⚠️ Error: ${message}`;
-      errorContainer.appendChild(errorEl);
-    }
-
-    const statusEl = document.getElementById('status');
-    if (statusEl) statusEl.textContent = 'Error';
   }
 }
 
-// Register custom element
+// Registrar el custom element para que pueda usarse en HTML
 customElements.define('moq-watch', MoQWatch);

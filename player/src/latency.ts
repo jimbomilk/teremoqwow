@@ -9,10 +9,17 @@
  *   - pts_timestamp: timestamp del frame en nanosegundos (PTS de MoQ, wallclock NTP)
  *   - offset_ntp: sincronización NTP estimada entre reloj local y servidor
  *
- * Phase 0 aproximación:
- *   - Asumimos que el catálogo proporciona `created_at` con `wallclock_ns` y `source: "ntp"`
- *   - Calculamos offset_ntp = (created_at_wallclock_ns / 1e6) - performance.now()
- *   - En cada frame, latency_ms ≈ (wallclock_now - pts_ms) - offset_ntp
+ * **Catálogo Real (v1)**:
+ *   El catálogo real proporciona `clock` con:
+ *   - `clock.wall`: integer, microsegundos desde epoch UTC (1e6 = 1 segundo)
+ *   - `clock.timescale`: integer, default 1000000 (divisor para convertir a segundos)
+ *
+ *   Para obtener offset NTP:
+ *   - wallclock_ns = clock.wall * (1_000_000 / clock.timescale)
+ *   - offset_ntp = (wallclock_ns / 1e6) - performance.now()
+ *
+ *   Alternativamente, si clock.wall ya está en microsegundos (timescale=1e6):
+ *   - offset_ntp = (clock.wall / 1000) - performance.now()
  */
 
 export interface LatencyMetrics {
@@ -27,18 +34,36 @@ export interface LatencyMetrics {
 }
 
 /**
- * Calcula el offset NTP usando el timestamp del catálogo.
- * Asume que `created_at.wallclock_ns` es un timestamp NTP absoluto.
+ * Calcula el offset NTP usando el clock del catálogo real.
  *
- * @param created_at_wallclock_ns - Timestamp NTP del catálogo en nanosegundos
+ * Acepta tanto el formato antiguo (`wallclock_ns` en nanosegundos) como el real
+ * con `clock.wall` (microsegundos) y `clock.timescale`.
+ *
+ * @param clockWallOrWallclockNs - clock.wall (microsegundos) o wallclock_ns (nanosegundos)
+ * @param timescale - Divisor del clock (default 1000000 = microsegundos)
  * @returns Offset NTP en milisegundos
  */
-export function estimateNTPOffset(created_at_wallclock_ns: number): number {
-  const created_at_ms = created_at_wallclock_ns / 1e6;
+export function estimateNTPOffset(
+  clockWallOrWallclockNs: number,
+  timescale: number = 1000000
+): number {
+  // Convertir clock.wall (microsegundos) o wallclock_ns (nanosegundos) a milisegundos
+  let catalog_ms: number;
+
+  if (clockWallOrWallclockNs > 1e12) {
+    // Probablemente nanosegundos (muy grande para microsegundos)
+    catalog_ms = clockWallOrWallclockNs / 1e6;
+  } else {
+    // Probablemente microsegundos, aplicar timescale
+    catalog_ms = (clockWallOrWallclockNs * 1000) / timescale;
+  }
+
   const now_ms = performance.now();
-  // Si el catálogo se creó hace poco, el offset refleja la diferencia entre
-  // el reloj NTP del servidor y el reloj local.
-  return created_at_ms - now_ms;
+
+  // El offset refleja la diferencia entre el reloj NTP del servidor (catalog)
+  // y el reloj local (performance.now).
+  // Si catalog_ms > now_ms, el servidor está adelantado.
+  return catalog_ms - now_ms;
 }
 
 /**

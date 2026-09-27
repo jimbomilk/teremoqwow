@@ -5,6 +5,10 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: false,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
   },
   build: {
     target: 'ES2020',
@@ -14,10 +18,11 @@ export default defineConfig({
       fileName: (format) => `player.${format === 'es' ? 'js' : 'umd.js'}`,
     },
     rollupOptions: {
-      external: ['@kixelated/moq'],
+      external: ['@moq/watch', '@moq/signals'],
       output: {
         globals: {
-          '@kixelated/moq': 'MoQ',
+          '@moq/watch': 'MoQWatch',
+          '@moq/signals': 'MoQSignals',
         },
       },
     },

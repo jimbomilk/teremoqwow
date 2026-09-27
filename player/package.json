@@ -12,7 +12,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@kixelated/moq": "^0.2.0"
+    "@moq/watch": "^0.6.1",
+    "@moq/signals": "^0.2.5"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
