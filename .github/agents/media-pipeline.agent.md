@@ -2,7 +2,7 @@
 name: Media Pipeline
 description: Gestiona la ingesta SRT, transcodificación multicalidad, audio broadcast y gateway SDI/NDI.
 model: 'Claude Sonnet 4.6 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search']
 agents: ['Arquitecto', 'MoQ Core']
 handoffs:
   - label: "Pasar al relay MoQ"
