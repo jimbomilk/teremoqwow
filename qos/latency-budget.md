@@ -16,8 +16,9 @@
 | **Decodificación + render** | WebCodecs (Browser) | 30 | 50 | Hardware decode si soportado (VP9, H.264); fallback software ≈100ms | player/src/latency.ts; WebCodecs API |
 | **Sincronización NTP** | Offset reloj cliente-servidor | 5 | 10 | Estimado una sola vez al inicio; asumimos relojes estables ±10ms | moq-clock-ietf |
 | **Overhead aplicación** | Player JS event loop, render scheduling | 10 | 20 | setTimeout, requestAnimationFrame overhead | |
+| **Conmutación ABR** | Delay histeresis + espera a IDR + actualización buffer player | 2000 | 5000 | Player espera IDR (≤2s) + histeresis (≤3s); se suma a latencia cuando se gatilla | #61; Fase 1 |
 | | | | | | |
-| **TOTAL glass-to-glass** | Suma pipelined (no perfectamente secuencial; hay overlap) | **160** | **650** | P95 ≤ 700ms ✓ | Criterio aceptación |
+| **TOTAL glass-to-glass** | Suma pipelined (no perfectamente secuencial; hay overlap) | **160** | **650** | P95 ≤ 700ms ✓ (sin conmutación) | Criterio aceptación |
 
 ## Análisis por etapa
 
@@ -110,7 +111,45 @@
 
 **Riesgo**: Heavy page (ads, tracking scripts) → event loop saturado → +30-100ms.
 
-## Total: P95 ≤ 700ms ✓
+### 9. Conmutación ABR (P50: 2000ms, P95: 5000ms)
+
+**Nota importante**: La latencia de conmutación ABR **NO se suma al path crítico** glass-to-glass en condiciones normales. Se suma **solo cuando se gatilla una conmutación** (cambio de rendition debido a cambio en throughput disponible).
+
+**Justificación**:
+
+La conmutación de renditions (High → Medium → Low o viceversa) bajo degradación de red introduce latencia adicional porque:
+
+1. **Histeresis de cambio** (~1-3s): El ABR controller espera confirmar que el throughput ha caído/subido de forma estable antes de cambiar. Esto evita oscillations rápidas.
+   - P50: ~1s (cambio rápido pero confirmado).
+   - P95: ~3s (throughput borderline; múltiples oscilaciones antes de confirmación).
+
+2. **Espera a IDR (keyframe)** (~0-2s): Player debe esperar al siguiente IDR para cambiar renditions sin artefactos. Con IDRs cada 2s:
+   - P50: ~1s (IDR ocurre dentro del segundo siguiente).
+   - P95: ~2s (throughput cae justo antes de un IDR; debe esperar siguiente ciclo).
+
+3. **Actualización de buffer player** (~0-1s): Descartar frames de rendition anterior + llenar buffer con nueva calidad.
+   - P50: ~0.5s.
+   - P95: ~1s (si hay buffer underrun durante cambio).
+
+**Suma de componentes**:
+- P50 conmutación: histeresis(1s) + IDR(1s) + buffer(0.5s) = **2000ms**.
+- P95 conmutación: histeresis(3s) + IDR(2s) + buffer(1s) - overlap parcial ≈ **5000ms** (caso más lento: throughput cae justo pre-IDR + histeresis máxima).
+
+**Referencia**: [Adaptive Bitrate Streaming — DASH spec](https://dashif.org/DASH-IF-IOP-v4.3.pdf); ABR controller recomendado con ventana de confirmación ≥1s para evitar thrashing.
+
+**Cuándo se suma**: Solo durante conmutación activa (evento `moq:abr` emitido). Entre conmutaciones (stream estable), latencia vuelve a P95 ≤ 700ms.
+
+**Riesgo**: 
+- ABR controller muy agresivo (histeresis <500ms) → oscillations → múltiples conmutaciones → latencia acumulada.
+- Throughput cae en el peor momento (pre-IDR) → espera máxima a siguiente IDR.
+
+**Mitigación** (#61):
+- Histeresis mínimo configurable: ≥1s down (throughput debe caer 1s antes de degradar).
+- Predicción de IDR: ABR puede optimizar cambio para hacerlo justo DESPUÉS de un IDR (ver player/src/abr.ts).
+
+## Total: P95 ≤ 700ms ✓ (sin conmutación activa)
+
+**Con conmutación ABR en curso**: P95 ≈ 700ms + 5000ms = 5700ms máximo. Esto es acceptable para uso live (conmutación ocurre ocasionalmente, no continuamente).
 
 ### Pipelined vs. sequential
 
