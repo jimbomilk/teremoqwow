@@ -1,0 +1,101 @@
+# docker-compose de prueba para SRT Bonding — issue #53
+# Orquesta: encoder-a (primario), encoder-b (backup), srt-bond relay, mediamtx
+#
+# Uso:
+#   docker compose -f config/srt-bond/docker-compose.yml up -d
+#   docker compose -f config/srt-bond/docker-compose.yml logs -f srt-bond
+
+services:
+
+  # ── Encoder primario — señal con borde rojo (distingue visualmente el origen)
+  encoder-a:
+    image: alpine:3.20
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache ffmpeg >/dev/null 2>&1
+        while true; do
+          ffmpeg -loglevel warning -re \
+            -f lavfi -i "testsrc2=size=1280x720:rate=25" \
+            -vf "drawbox=w=iw:h=ih:color=red:t=40" \
+            -c:v libx264 -preset ultrafast -tune zerolatency \
+            -b:v 2M -g 50 -pix_fmt yuv420p \
+            -an -f mpegts \
+            "srt://srt-bond:8891?mode=caller&latency=200" || true
+          echo "[encoder-a] link lost, retrying in 2s"
+          sleep 2
+        done
+    networks:
+      - srt-net
+    depends_on:
+      - srt-bond
+    restart: unless-stopped
+
+  # ── Encoder de respaldo — señal con borde azul
+  encoder-b:
+    image: alpine:3.20
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache ffmpeg >/dev/null 2>&1
+        while true; do
+          ffmpeg -loglevel warning -re \
+            -f lavfi -i "testsrc2=size=1280x720:rate=25" \
+            -vf "drawbox=w=iw:h=ih:color=blue:t=40" \
+            -c:v libx264 -preset ultrafast -tune zerolatency \
+            -b:v 2M -g 50 -pix_fmt yuv420p \
+            -an -f mpegts \
+            "srt://srt-bond:8892?mode=caller&latency=200" || true
+          echo "[encoder-b] link lost, retrying in 2s"
+          sleep 2
+        done
+    networks:
+      - srt-net
+    depends_on:
+      - srt-bond
+    restart: unless-stopped
+
+  # ── SRT Bond Relay (active-backup) ──────────────────────────────────────
+  srt-bond:
+    image: alpine:3.20
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache srt >/dev/null 2>&1
+        exec /bin/sh /bond/bond.sh
+    volumes:
+      - ./bond.sh:/bond/bond.sh:ro
+    env_file:
+      - srt-bond.conf
+    ports:
+      - "8891:8891/udp"
+      - "8892:8892/udp"
+    networks:
+      - srt-net
+    depends_on:
+      - mediamtx
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep srt-live-transmit >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+
+  # ── MediaMTX (ingesta SRT — issue #52) ──────────────────────────────────
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    volumes:
+      - ../mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8890:8890/udp"
+      - "9997:9997"
+      - "9998:9998"
+    networks:
+      - srt-net
+    restart: unless-stopped
+
+networks:
+  srt-net:
+    driver: bridge
+    name: teremoqwow-srt

@@ -6,7 +6,9 @@ Plataforma de broadcast de latencia ultra baja sobre **Media over QUIC (MoQ)**, 
 
 ```mermaid
 flowchart LR
-  CAM[Cámara / Encoder SRT] -->|SRT bonding| MTX[MediaMTX]
+  CAM_A[Encoder A · primario] -->|SRT :8891| BOND[srt-bond relay]
+  CAM_B[Encoder B · backup]   -->|SRT :8892| BOND
+  BOND -->|SRT :8890 live-main| MTX[MediaMTX]
   MTX -->|RTMP/RTP| MUX[moq-mux + FFmpeg]
   MUX -->|MoQ tracks| RELAY[moq-relay-ietf]
   RELAY -->|MoQ| PLAYER[@moq/watch player]

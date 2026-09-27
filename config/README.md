@@ -13,5 +13,6 @@ Configuración declarativa por servicio.
 
 - `.env.example` — plantilla de todas las variables.
 - `mediamtx/` — configuración de MediaMTX (issue [#52](https://github.com/jimbomilk/teremoqwow/issues/52)).
+- `srt-bond/` — bond SRT active-backup entre encoders y MediaMTX (issue [#53](https://github.com/jimbomilk/teremoqwow/issues/53)).
 - `relay/` — configuración del relay (issue [#54](https://github.com/jimbomilk/teremoqwow/issues/54)).
 - `krakend/` — configuración de KrakenD (issue [#55](https://github.com/jimbomilk/teremoqwow/issues/55)).
