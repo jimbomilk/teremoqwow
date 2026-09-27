@@ -1,7 +1,7 @@
 ---
 name: Monetization & DRM
 description: Gestiona Stripe Billing, EZDRM multi-DRM, SSAI publicidad y flujos de pago.
-model: 'Claude Opus 4.7 (anthropic)'
+model: 'Claude Sonnet 4.6 (anthropic)'
 tools: ['read', 'edit', 'search']
 agents: ['Arquitecto', 'Client Portal']
 handoffs:
