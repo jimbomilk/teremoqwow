@@ -120,3 +120,44 @@ moq-clock --tls-disable-verify \
 
 El campo `auth_token` del announce sigue el esquema [schemas/relay/v1/announce.json](../../schemas/relay/v1/announce.json).
 El campo `priority` del subscribe sigue el esquema [schemas/relay/v1/subscribe.json](../../schemas/relay/v1/subscribe.json).
+
+---
+
+## Dynamic Track Switching (DTS)
+
+**¿Qué es DTS en `moq-rs`?**
+
+Dynamic Track Switching permite al subscriber conmutar entre tracks de distinta calidad sin interrumpir el stream. En `moq-rs`, los tracks publicados bajo el mismo `namespace` y con la misma clave `selection_group` en el catálogo son conmutables en fronteras de grupo (cada grupo comienza en un IDR, alineado a 2 s en nuestra configuración). El relay reenvía los grupos que ya tiene en caché (`max-age`) al nuevo track sin requerir renegociación de sesión.
+
+**El relay no necesita configuración especial para DTS.** Basta con que los 3 tracks estén anunciados bajo el mismo `selection_group` en el catálogo (`config/moq-mux/example-catalog.json`).
+
+### Umbrales de throughput (Fase 1)
+
+| Calidad | Resolución | Bitrate | Condición de activación |
+|---------|-----------|---------|-------------------------|
+| High    | 1280×720  | 3000 kbps | throughput > 4000 kbps |
+| Medium  | 854×480   | 2000 kbps | 2500 < throughput ≤ 4000 kbps |
+| Low     | 640×360   | 1000 kbps | throughput ≤ 2500 kbps |
+
+La lógica de conmutación reside en el player ABR. Ver [issue #60](https://github.com/jimbomilk/teremoqwow/issues/60) para la implementación del controlador (`player/src/moq-watch.ts`).
+
+### Verificar que los 3 tracks están disponibles
+
+```bash
+# Lista los tracks anunciados actualmente en el relay
+curl http://localhost:8090/announced/
+
+# Descarga el catálogo y confirma los selection_group
+moq fetch catalog.json
+```
+
+Espera ver las entradas `anon/live1/video/high`, `anon/live1/video/medium` y `anon/live1/video/low` (o equivalentes según el namespace configurado).
+
+### Diagnóstico: forzar un track concreto para testing
+
+```bash
+# Fuerza la suscripción al track High sin pasar por el ABR
+moq --connect tcp://localhost:4444/anon --broadcast anon/live1 export ts --video-name "0.avc3"
+```
+
+Sustituye `"0.avc3"` por el `name` exacto del track tal como aparece en el catálogo.
