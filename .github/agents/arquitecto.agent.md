@@ -1,7 +1,7 @@
 ---
 name: Arquitecto
 description: Diseña la arquitectura, define contratos, orquesta agentes especialistas y publica cambios en GitHub.
-model: 'Claude Opus 4.7 (anthropic)'
+model: 'Claude Sonnet 4.6 (anthropic)'
 tools: ['read', 'edit', 'search', 'execute', 'github/*', 'agent'] # Único agente con terminal, GitHub MCP y capacidad de delegar
 agents: # Agentes a los que puede delegar tareas
   - Media Pipeline
