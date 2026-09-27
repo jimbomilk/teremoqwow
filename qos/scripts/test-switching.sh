@@ -69,9 +69,9 @@ error() {
 cleanup() {
   log "Cleaning up..."
 
-  # Matar procesos en background
-  [[ -n "${MOQ_PID:-}" ]] && kill "${MOQ_PID}" 2>/dev/null || true
-  [[ -n "${FFMPEG_PID:-}" ]] && kill "${FFMPEG_PID}" 2>/dev/null || true
+  # Eliminar contenedores de test
+  docker rm -f ts-moq-relay ts-moq-import ts-ffmpeg 2>/dev/null || true
+  docker network rm teremoqwow-e2e 2>/dev/null || true
 
   # Restaurar tc qdisc (loopback)
   if [[ -n "${NETEM_APPLIED:-}" ]]; then
@@ -109,15 +109,12 @@ check_net_admin() {
 ##############################################################################
 
 check_dependencies() {
-  if ! command -v moq &>/dev/null; then
-    error "moq CLI no encontrado. Instala con: cargo install moq-cli"
+  # Usamos docker en lugar de binarios nativos; solo docker es requerido.
+  if ! command -v docker &>/dev/null; then
+    error "docker no encontrado."
     exit 1
   fi
-  if ! command -v ffmpeg &>/dev/null; then
-    error "ffmpeg no encontrado."
-    exit 1
-  fi
-  log "Dependencies check: OK"
+  log "Dependencies check: OK (usando docker moqdev/moq + linuxserver/ffmpeg)"
 }
 
 ##############################################################################
@@ -148,24 +145,49 @@ apply_netem() {
 ##############################################################################
 
 start_pipeline() {
-  log "Starting moq import srt listener on ${SRT_LISTEN_ADDR}..."
+  # Red docker compartida con el relay
+  DOCKER_NET="teremoqwow-e2e"
+  docker network create "${DOCKER_NET}" 2>/dev/null || true
 
-  # moq import srt --listen (background)
-  moq \
-    --connect "${MOQ_RELAY_TCP}" \
+  log "Starting moq-relay..."
+  CERT_DIR="${REPO_ROOT}/config/relay/certs"
+  # Genera cert dev de 14 días si no existe
+  if [[ ! -f "${CERT_DIR}/relay.pem" ]]; then
+    mkdir -p "${CERT_DIR}"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+      -keyout "${CERT_DIR}/relay.key" -out "${CERT_DIR}/relay.pem" \
+      -days 14 -nodes -subj "/CN=localhost" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
+    log "Dev cert generated (14 days)"
+  fi
+  docker run -d --name ts-moq-relay --network "${DOCKER_NET}" \
+    -p 4444:4444 -p 8090:8090 \
+    -v "${CERT_DIR}:/certs:ro" \
+    moqdev/moq-relay:latest \
+    --listen '[::]:4443' \
+    --listen-tls-cert /certs/relay.pem --listen-tls-key /certs/relay.key \
+    --listen-tcp-bind '[::]:4444' \
+    --auth-public 'anon/**' \
+    --web-http-listen '[::]:8090' >"${MOQ_LOG}" 2>&1
+  sleep 3
+
+  log "Starting moq import srt listener on ${SRT_LISTEN_ADDR}..."
+  docker run -d --name ts-moq-import --network "${DOCKER_NET}" \
+    -p 8890:8890/udp \
+    moqdev/moq:latest \
+    --connect tcp://ts-moq-relay:4444/anon \
     --broadcast "${MOQ_BROADCAST}" \
-    import srt \
-      --listen "${SRT_LISTEN_ADDR}" \
-      --latency "${SRT_LATENCY}" \
-    >"${MOQ_LOG}" 2>&1 &
-  MOQ_PID=$!
+    import srt --listen '[::]:8890' --latency "${SRT_LATENCY}" \
+    >>"${MOQ_LOG}" 2>&1
+  MOQ_PID="ts-moq-import"  # placeholder; cleanup usa docker rm
+  sleep 2
 
   sleep 1  # Dar tiempo a que se abra el socket
 
-  log "Starting FFmpeg testsrc pipeline..."
+  log "Starting FFmpeg testsrc pipeline (docker)..."
 
-  # FFmpeg: 3 renditions (High/Medium/Low) con alineación de IDRs a 2s
-  ffmpeg -hide_banner -loglevel warning \
+  docker run -d --name ts-ffmpeg --network "${DOCKER_NET}" \
+    linuxserver/ffmpeg:latest \
     -re \
     -f lavfi -i "testsrc2=size=1280x720:rate=30" \
     -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
@@ -201,11 +223,11 @@ start_pipeline() {
     -pix_fmt:v:2 yuv420p \
     \
     -c:a aac -b:a 128k -ar 48000 -ac 2 \
-    -f mpegts "srt://127.0.0.1:8890?streamid=publish:live1" \
-    >"${FFMPEG_LOG}" 2>&1 &
-  FFMPEG_PID=$!
+    -f mpegts 'srt://ts-moq-import:8890?streamid=publish:live1' \
+    >"${FFMPEG_LOG}" 2>&1
+  FFMPEG_PID="ts-ffmpeg"  # placeholder
 
-  sleep 2  # Dar tiempo a que se establezca la conexión
+  sleep 4  # Dar tiempo a que se establezca la conexión
 
   log "Pipeline started: OK"
 }
@@ -219,10 +241,11 @@ export_stream() {
 
   # moq export ts: consume del relay y exporta a stdout
   # Timeout para evitar bloqueos
-  timeout "${EXPORT_DURATION_SEC}" moq \
-    --connect "${MOQ_RELAY_TCP}" \
+  timeout "${EXPORT_DURATION_SEC}" docker run --rm --network teremoqwow-e2e \
+    moqdev/moq:latest \
+    --connect tcp://ts-moq-relay:4444/anon \
+    --broadcast "${MOQ_BROADCAST}" \
     export ts \
-      "${MOQ_BROADCAST}" \
     >"${EXPORT_LOG}" 2>&1 || {
     local exit_code=$?
     # exit_code 124 es timeout (esperado); otros son error
