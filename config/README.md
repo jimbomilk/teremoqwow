@@ -15,3 +15,4 @@ Configuración declarativa por servicio.
 - `mediamtx/` — configuración de MediaMTX (issue [#52](https://github.com/jimbomilk/teremoqwow/issues/52)).
 - `relay/` — configuración del relay (issue [#54](https://github.com/jimbomilk/teremoqwow/issues/54)).
 - `krakend/` — configuración de KrakenD (issue [#55](https://github.com/jimbomilk/teremoqwow/issues/55)).
+- `moq-mux/` — pipeline FFmpeg → moq-pub: transcodificación ABR 3 renditions + catálogo MoQ (issue [#56](https://github.com/jimbomilk/teremoqwow/issues/56)).
