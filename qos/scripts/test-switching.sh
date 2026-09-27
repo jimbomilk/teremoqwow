@@ -282,25 +282,31 @@ verify_no_404() {
 verify_skipped_groups() {
   log "Verifying skipped MoQ groups ratio..."
 
-  # Extraer métricas: contar líneas "skipping covered group"
-  local skipped_groups=$(grep -c "skipping covered group" "${EXPORT_LOG}" || echo 0)
-  local total_groups=$(grep -c "group" "${EXPORT_LOG}" || echo 1)  # Evitar división por 0
+  # El log contiene texto de moq; grep -c puede fallar en logs binarios.
+  # Usamos grep + wc -l sobre texto filtrado para evitar errores de valor.
+  local skipped_groups
+  skipped_groups=$(grep -a 'skipping covered group' "${EXPORT_LOG}" 2>/dev/null | wc -l | tr -d ' \n')
+  skipped_groups=${skipped_groups:-0}
 
-  # Calcular ratio
-  if [[ $total_groups -eq 0 ]]; then
-    log "WARNING: No groups found in export log (stream may be short)"
-    # No fallar si no hay grupos, es un edge case
+  local total_groups
+  total_groups=$(grep -a 'fetch started\|subscribe started' "${EXPORT_LOG}" 2>/dev/null | wc -l | tr -d ' \n')
+  total_groups=${total_groups:-0}
+
+  log "Skipped groups: ${skipped_groups}  |  Total events: ${total_groups}"
+
+  if [[ ${total_groups} -eq 0 ]]; then
+    log "WARNING: No group events in export log — stream may be too short"
     return 0
   fi
 
-  local ratio=$(echo "scale=3; ${skipped_groups} / ${total_groups}" | bc)
-
-  log "Skipped groups: ${skipped_groups}/${total_groups} (ratio: ${ratio})"
+  local ratio
+  ratio=$(awk "BEGIN{printf \"%.3f\", ${skipped_groups}/${total_groups}}")
 
   # Verificar threshold
-  local max_skipped=$(echo "scale=0; ${total_groups} * ${MAX_SKIPPED_GROUP_RATIO}" | bc)
+  local max_skipped
+  max_skipped=$(awk "BEGIN{printf \"%d\", int(${total_groups} * ${MAX_SKIPPED_GROUP_RATIO})}")
   if [[ ${skipped_groups} -gt ${max_skipped} ]]; then
-    error "Skipped groups exceed threshold: ${skipped_groups} > ${max_skipped}"
+    error "Skipped groups exceed threshold: ${skipped_groups} > ${max_skipped} (${ratio} >= ${MAX_SKIPPED_GROUP_RATIO})"
     return 1
   fi
 
