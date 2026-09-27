@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/api/v1/interaction-create.json",
+  "title": "InteractionCreate",
+  "description": "Solicitud para crear una interacción del espectador (voto, reacción, pregunta) asociada al broadcast.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["broadcast", "session_token", "kind", "payload"],
+  "properties": {
+    "broadcast": {
+      "type": "string",
+      "description": "Namespace MoQ del broadcast."
+    },
+    "session_token": {
+      "type": "string",
+      "description": "JWT emitido por el gateway tras autenticar al espectador."
+    },
+    "client_id": {
+      "type": "string",
+      "description": "Identificador estable del cliente (para deduplicación)."
+    },
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["vote", "reaction", "question", "cheer", "custom"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Datos específicos del kind."
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/telemetry-event.json",
+  "title": "TelemetryEvent",
+  "description": "Evento de datos (stats, marcador, comentarios, publicidad) sincronizado con el PTS del vídeo. Sucesor canónico de telemetry-frame.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "timestamp", "kind", "payload"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador único del evento (UUIDv4)."
+    },
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Discriminador jerárquico en dot.notation (p.ej. 'stats.match', 'marker.goal', 'ads.cue').",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+    },
+    "source": {
+      "type": "string",
+      "description": "Sistema origen (adaptador Opta, Stats Perform, operador interno…)."
+    },
+    "producer_id": {
+      "type": "string",
+      "description": "Identificador del productor concreto dentro del source."
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Orden monótono por (source, producer_id)."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Payload específico del kind. El shape lo define cada adaptador."
+    }
+  }
+}

@@ -20,12 +20,12 @@
 | Dominio | Ruta | Responsable |
 |---|---|---|
 | Común (errores, timestamps) | [schemas/common/](../schemas/common/) | Arquitecto |
-| Media (renditions, catálogo) | [schemas/media/](../schemas/media/) | Media Pipeline |
+| Media (renditions, catálogo MoQ) | [schemas/media/](../schemas/media/) | Media Pipeline |
 | Relay MoQ (announce, subscribe) | [schemas/relay/](../schemas/relay/) | MoQ Core |
-| Sincronización y telemetría | [schemas/sync/](../schemas/sync/) | Sync & Telemetry |
+| Sincronización, telemetría, QoS, overlays | [schemas/sync/](../schemas/sync/) | Sync & Telemetry |
 | DRM (licencias) | [schemas/drm/](../schemas/drm/) | Monetization & DRM |
-| Registry (nodos de federación) | [schemas/registry/](../schemas/registry/) | MoQ Core |
-| API pública (OpenAPI KrakenD) | [schemas/api/](../schemas/api/) | Arquitecto |
+| Registry (nodos, join) | [schemas/registry/](../schemas/registry/) | MoQ Core |
+| API pública (OpenAPI KrakenD, interacciones) | [schemas/api/](../schemas/api/) | Arquitecto |
 
 ## Validación
 

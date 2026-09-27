@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/overlay-payload.json",
+  "title": "OverlayPayload",
+  "description": "Instrucción de overlay HTML5 sincronizada con el PTS del vídeo (marcadores, gráficos, publicidad, subtítulos ricos).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "timestamp", "duration_ms"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["scoreboard", "marker", "banner", "lower-third", "cta", "ad", "poll", "custom"]
+    },
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Duración total del overlay. 0 = mostrar hasta que llegue el siguiente overlay del mismo target."
+    },
+    "target": {
+      "type": "string",
+      "description": "Zona del player donde renderizar (top-left, top-right, bottom-bar, full…).",
+      "default": "bottom-bar"
+    },
+    "z_index": {
+      "type": "integer",
+      "default": 100
+    },
+    "template": {
+      "type": "string",
+      "description": "Identificador del template HTML/CSS que renderiza el payload."
+    },
+    "data": {
+      "type": "object",
+      "description": "Datos inyectados en el template."
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["none", "link", "interaction"]
+        },
+        "href": { "type": "string", "format": "uri" },
+        "interaction_kind": {
+          "type": "string",
+          "description": "Si type=interaction, valor de InteractionCreate.kind."
+        }
+      }
+    }
+  }
+}
