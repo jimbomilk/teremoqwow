@@ -1,0 +1,35 @@
+openapi: 3.1.0
+info:
+  title: teremoqwow API
+  version: 0.1.0
+  description: |
+    API pública de teremoqwow expuesta por KrakenD.
+    Stub inicial de Fase 0. El modelado completo se realiza en la issue #55.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: https://api.teremoqwow.dev
+    description: Producción
+  - url: https://api.staging.teremoqwow.dev
+    description: Staging
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+components:
+  schemas:
+    Error:
+      $ref: https://teremoqwow.dev/schemas/common/v1/error.json

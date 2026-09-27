@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/relay/v1/subscribe.json",
+  "title": "Subscribe",
+  "description": "Suscripción de un consumidor a un track dentro de un namespace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["namespace", "track_name"],
+  "properties": {
+    "namespace": { "type": "string" },
+    "track_name": { "type": "string" },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255,
+      "default": 128
+    },
+    "group_order": {
+      "type": "string",
+      "enum": ["ascending", "descending"],
+      "default": "ascending"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/common/v1/timestamp.json",
+  "title": "Timestamp",
+  "description": "Marca temporal canónica: NTP wallclock y PTS del media pipeline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["wallclock_ns"],
+  "properties": {
+    "wallclock_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Nanosegundos desde epoch UNIX (UTC)."
+    },
+    "pts_90khz": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "PTS media en clock 90 kHz. Opcional para eventos sin media."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["ntp", "ptp", "media", "app"],
+      "description": "Origen del reloj."
+    }
+  }
+}

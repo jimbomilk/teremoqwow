@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/relay/v1/announce.json",
+  "title": "Announce",
+  "description": "Anuncio de namespace de un productor al relay MoQ.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["namespace", "producer_id"],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "description": "Namespace MoQ jerárquico (segmentos separados por '/')."
+    },
+    "producer_id": {
+      "type": "string",
+      "description": "Identificador estable del productor."
+    },
+    "auth_token": {
+      "type": "string",
+      "description": "Bearer opcional para relays que exigen autenticación."
+    }
+  }
+}

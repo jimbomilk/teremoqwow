@@ -1,0 +1,52 @@
+name: Feature
+description: Propuesta de nueva funcionalidad o mejora.
+title: "[feat] "
+labels: ["feature"]
+body:
+  - type: dropdown
+    id: modulo
+    attributes:
+      label: Módulo afectado
+      options:
+        - core
+        - relay
+        - player
+        - overlays
+        - adapters
+        - comercial
+        - drm
+        - qos
+        - schemas
+        - config
+        - scripts
+        - docs
+        - .github (gobernanza)
+    validations:
+      required: true
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema o necesidad
+    validations:
+      required: true
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta
+      description: Describe el enfoque. Enlaza esquemas o contratos afectados.
+    validations:
+      required: true
+  - type: textarea
+    id: contratos
+    attributes:
+      label: Contratos impactados
+      description: Rutas dentro de `schemas/` que crea, cambia o versiona.
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas consideradas
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Criterios de aceptación
+      description: Lista verificable.

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/telemetry-frame.json",
+  "title": "TelemetryFrame",
+  "description": "Frame de telemetría alineado con el PTS del vídeo para overlays sincronizados.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["timestamp", "kind", "payload"],
+  "properties": {
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Discriminador del tipo de payload (p.ej. 'stats.match', 'marker.goal')."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Datos específicos del kind."
+    }
+  }
+}

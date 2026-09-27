@@ -1,0 +1,68 @@
+labels:
+  # Fases
+  - name: fase-0
+    color: "0e8a16"
+    description: Trabajo del milestone Fase 0 (Fundación)
+  - name: fase-1
+    color: "1d76db"
+    description: Trabajo del milestone Fase 1 (MVP monetizable)
+  - name: fase-2
+    color: "5319e7"
+    description: Trabajo del milestone Fase 2 (Federación y escala)
+  - name: fase-3
+    color: "b60205"
+    description: Trabajo del milestone Fase 3 (Interactividad avanzada)
+
+  # Ejes transversales
+  - name: fundacion
+    color: "c2e0c6"
+    description: Setup y base del monorepo
+
+  # Áreas por agente
+  - name: arquitecto
+    color: "5319e7"
+    description: Contratos, esquemas, gateway
+  - name: moq-core
+    color: "0052cc"
+    description: Relay MoQ y federación
+  - name: media-pipeline
+    color: "fbca04"
+    description: Ingesta SRT, transcodificación, gateway SDI/NDI
+  - name: player
+    color: "d4c5f9"
+    description: Player @moq/watch y ABR
+  - name: overlays
+    color: "bfdadc"
+    description: Overlays HTML5 interactivos
+  - name: sync
+    color: "006b75"
+    description: Lip-sync y telemetría
+  - name: qos
+    color: "b60205"
+    description: Métricas de QoS
+  - name: drm
+    color: "e11d21"
+    description: EZDRM multi-DRM
+  - name: comercial
+    color: "f9d0c4"
+    description: Stripe, portales, SSAI
+  - name: srt-bonding
+    color: "fef2c0"
+    description: Bonding SRT
+  - name: validacion
+    color: "bfd4f2"
+    description: Pruebas de aceptación / benchmarks
+
+  # Estándar
+  - name: bug
+    color: "d73a4a"
+    description: Fallo reproducible
+  - name: feature
+    color: "a2eeef"
+    description: Nueva funcionalidad
+  - name: chore
+    color: "cccccc"
+    description: Tareas de mantenimiento
+  - name: docs
+    color: "0075ca"
+    description: Documentación

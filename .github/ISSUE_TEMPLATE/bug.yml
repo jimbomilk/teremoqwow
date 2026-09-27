@@ -1,0 +1,60 @@
+name: Bug
+description: Reporta un fallo reproducible.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: modulo
+    attributes:
+      label: Módulo afectado
+      options:
+        - core
+        - relay
+        - player
+        - overlays
+        - adapters
+        - comercial
+        - drm
+        - qos
+        - schemas
+        - config
+        - scripts
+        - docs
+        - .github (gobernanza)
+    validations:
+      required: true
+  - type: dropdown
+    id: severidad
+    attributes:
+      label: Severidad
+      options:
+        - S1 · caída de producción
+        - S2 · degradación funcional
+        - S3 · defecto menor
+        - S4 · cosmético
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducir
+      description: Sé preciso; incluye versiones, configuración y comandos.
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Comportamiento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportamiento actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / evidencias
+      render: shell

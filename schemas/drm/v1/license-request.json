@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/drm/v1/license-request.json",
+  "title": "LicenseRequest",
+  "description": "Solicitud de licencia DRM enviada al gateway teremoqwow (EZDRM).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["drm_system", "content_id", "session_token"],
+  "properties": {
+    "drm_system": {
+      "type": "string",
+      "enum": ["widevine", "playready", "fairplay"]
+    },
+    "content_id": {
+      "type": "string",
+      "description": "Identificador del contenido protegido."
+    },
+    "session_token": {
+      "type": "string",
+      "description": "JWT emitido por el gateway tras autenticar al usuario."
+    },
+    "challenge": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "Reto CDM en base64."
+    }
+  }
+}

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Preguntas de arquitectura
+    url: https://github.com/jimbomilk/teremoqwow/discussions
+    about: Abre una discussion antes de proponer cambios en contratos o layout.
