@@ -2,7 +2,7 @@
 name: Client Portal
 description: Gestiona el portal de suscriptor (Stripe Portal) y el portal de desarrollador (Moesif).
 model: 'Claude Haiku 4.5 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search', 'execute', 'github/*']
 agents: ['Arquitecto', 'Monetization & DRM']
 handoffs:
   - label: "Notificar a Monetization"

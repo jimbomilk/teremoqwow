@@ -2,7 +2,7 @@
 name: Sync & Telemetry
 description: Gestiona la sincronización lip-sync, el track de telemetría y las métricas de QoS.
 model: 'Claude Haiku 4.5 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search', 'execute', 'github/*']
 agents: ['Arquitecto', 'MoQ Core', 'Data Adapters']
 handoffs:
   - label: "Publicar telemetría"

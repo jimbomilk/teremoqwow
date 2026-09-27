@@ -2,7 +2,7 @@
 name: Player & Overlay
 description: Gestiona el player @moq/watch, el ABR y los overlays HTML5 interactivos.
 model: 'Claude Haiku 4.5 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search', 'execute', 'github/*']
 agents: ['Arquitecto', 'Sync & Telemetry']
 handoffs:
   - label: "Sincronizar overlay"

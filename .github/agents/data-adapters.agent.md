@@ -2,7 +2,7 @@
 name: Data Adapters
 description: Conecta APIs externas (Opta, Stats Perform, GeoIP) con el esquema canónico de teremoqwow.
 model: 'Claude Haiku 4.5 (anthropic)'
-tools: ['read', 'edit', 'search', 'runCommands']
+tools: ['read', 'edit', 'search', 'execute', 'github/*']
 agents: ['Arquitecto', 'Sync & Telemetry']
 handoffs:
   - label: "Publicar datos normalizados"
