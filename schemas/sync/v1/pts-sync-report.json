@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/pts-sync-report.json",
+  "title": "PtsSyncReport",
+  "description": "Reporte de verificación de sincronía PTS entre eventos de telemetría y el vídeo del mismo instante. Criterio SLA: pts_deviation_ms_avg < 50ms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["broadcast", "measured_at", "window_sec", "events_sampled", "pts_deviation_ms_avg", "pts_deviation_ms_max", "threshold_ms", "pass"],
+  "properties": {
+    "broadcast": { "type": "string" },
+    "measured_at": { "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json" },
+    "window_sec": { "type": "integer", "minimum": 1 },
+    "events_sampled": { "type": "integer", "minimum": 0 },
+    "pts_deviation_ms_avg": { "type": "number", "description": "Desviación media |pts_telemetry - pts_video| en ms." },
+    "pts_deviation_ms_max": { "type": "number" },
+    "threshold_ms": { "type": "number", "minimum": 0, "description": "SLA: 50ms." },
+    "pass": { "type": "boolean" }
+  }
+}

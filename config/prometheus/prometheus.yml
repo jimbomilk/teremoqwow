@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Retention time: set via CLI flag: --storage.tsdb.retention.time=30d
+  # This ensures telemetry data is kept for 30 days before deletion
+
+scrape_configs:
+  - job_name: moq-relay
+    static_configs:
+      - targets: ['moq-relay:9101']
+    metrics_path: /metrics
+
+  - job_name: mediamtx
+    static_configs:
+      - targets: ['mediamtx:9998']
+    metrics_path: /metrics
+
+  - job_name: krakend
+    static_configs:
+      - targets: ['krakend:9090']
+    metrics_path: /metrics
+
+  - job_name: teremoqwow-qos
+    static_configs:
+      - targets: ['localhost:9200']
+    metrics_path: /qos-metrics
