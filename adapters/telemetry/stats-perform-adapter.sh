@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Stats Perform Telemetry Adapter
+# Polls matchdetail endpoint and publishes events to MOQ relay
+
+# Configuration variables
+STATS_PERFORM_URL="${STATS_PERFORM_URL:-https://api.statsperform.com/v1/data}"
+STATS_PERFORM_TOKEN="${STATS_PERFORM_TOKEN:-REPLACE_ME}"
+MATCH_ID="${MATCH_ID:-}"
+MOQ_RELAY_TCP="${MOQ_RELAY_TCP:-tcp://127.0.0.1:4444/anon}"
+BROADCAST="${BROADCAST:-anon/live1}"
+POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-5}"
+VIDEO_TIMESCALE="${VIDEO_TIMESCALE:-90000}"
+
+# Validate MATCH_ID
+if [[ -z "$MATCH_ID" ]]; then
+    echo "[ADAPTER] ERROR: MATCH_ID is required" >&2
+    exit 1
+fi
+
+# State
+SEQ=0
+
+# Cleanup on exit
+cleanup() {
+    echo "[ADAPTER] INFO: shutting down gracefully" >&2
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+# Main loop
+while true; do
+    # Fetch matchdetail from Stats Perform API
+    RESPONSE=$(curl -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${STATS_PERFORM_TOKEN}" \
+        "${STATS_PERFORM_URL}/matchdetail/${MATCH_ID}" 2>/dev/null || echo "")
+    
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+    BODY=$(echo "$RESPONSE" | sed '$d')
+    
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        echo "[ADAPTER] WARN: HTTP $HTTP_CODE from Stats Perform API, retrying..." >&2
+        sleep "$POLL_INTERVAL_SEC"
+        continue
+    fi
+    
+    if [[ -z "$BODY" ]]; then
+        echo "[ADAPTER] WARN: empty response body, retrying..." >&2
+        sleep "$POLL_INTERVAL_SEC"
+        continue
+    fi
+    
+    # Generate canonical telemetry event
+    WALLCLOCK_NS=$(($(date +%s%N)))
+    EVENT_JSON=$(python3 << PYTHON_EOF
+import json
+import uuid
+import sys
+
+try:
+    api_response = json.loads('''$BODY''')
+except:
+    sys.exit(1)
+
+event = {
+    "id": str(uuid.uuid4()),
+    "timestamp": {
+        "wallclock_ns": int($WALLCLOCK_NS),
+        "source": "app"
+    },
+    "kind": "stats.match",
+    "source": "stats-perform",
+    "producer_id": "$MATCH_ID",
+    "sequence": $SEQ,
+    "payload": {
+        "matchId": api_response.get("matchId"),
+        "homeTeam": api_response.get("homeTeam"),
+        "awayTeam": api_response.get("awayTeam"),
+        "score": api_response.get("score")
+    }
+}
+
+print(json.dumps(event))
+PYTHON_EOF
+)
+    
+    if [[ -z "$EVENT_JSON" ]]; then
+        echo "[ADAPTER] WARN: failed to transform event, skipping..." >&2
+        sleep "$POLL_INTERVAL_SEC"
+        continue
+    fi
+    
+    # Publish with backpressure handling
+    START_TIME=$(date +%s%N)
+    
+    PUBLISH_OUTPUT=$(echo "$EVENT_JSON" | timeout 2 docker run --rm -i \
+        --network teremoqwow-e2e \
+        moqdev/moq:latest \
+        --connect "${MOQ_RELAY_TCP}" \
+        --broadcast "${BROADCAST}" \
+        publish telemetry 2>&1) || PUBLISH_STATUS=$?
+    
+    END_TIME=$(date +%s%N)
+    ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+    
+    if [[ ${PUBLISH_STATUS:-0} -eq 124 ]]; then
+        # Timeout (>2s)
+        echo "[ADAPTER] WARN: backpressure — skipping frame" >&2
+    elif [[ ${PUBLISH_STATUS:-0} -ne 0 ]]; then
+        echo "[ADAPTER] WARN: publish failed (exit code $PUBLISH_STATUS), retrying..." >&2
+    else
+        echo "[ADAPTER] OK: published event seq=$SEQ kind=stats.match" >&2
+        ((SEQ++))
+    fi
+    
+    sleep "$POLL_INTERVAL_SEC"
+done

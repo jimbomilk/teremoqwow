@@ -1,0 +1,23 @@
+groups:
+  - name: teremoqwow_qos
+    interval: 30s
+    rules:
+      - alert: HighE2ELatency
+        expr: moq_relay_latency_ms_p95 > 700
+        for: 2m
+        labels:
+          severity: warning
+          component: relay
+        annotations:
+          summary: "High End-to-End Latency Detected"
+          description: "P95 latency is {{ $value }}ms (threshold: 700ms) for job {{ $labels.job }}"
+
+      - alert: LipSyncDrift
+        expr: abs(teremoqwow_lipsync_offset_ms) > 45
+        for: 1m
+        labels:
+          severity: critical
+          component: sync
+        annotations:
+          summary: "Lip-Sync Drift Exceeded"
+          description: "Audio-Video offset is {{ $value }}ms (threshold: 45ms) for broadcast {{ $labels.broadcast }}"
