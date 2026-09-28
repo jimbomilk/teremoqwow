@@ -1,0 +1,8 @@
+{
+  "track_name": "sync",
+  "kind": "sync",
+  "packaging": "mediatimeline",
+  "timescale": 90000,
+  "pulse_interval_sec": 1,
+  "note": "moq-clock-ietf publica un pulso por segundo. El player lo usa para corregir deriva de reloj."
+}

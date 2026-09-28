@@ -1,0 +1,20 @@
+{
+  "tracks": [
+    {
+      "track_name": "subs_sign_lang",
+      "kind": "video",
+      "role": "sign-language",
+      "width": 480,
+      "height": 360,
+      "note": "Ventana secundaria en el player; renderizar en PiP"
+    },
+    {
+      "track_name": "audio-description",
+      "kind": "audio",
+      "role": "audiodescription",
+      "bitrate_kbps": 96,
+      "sample_rate_hz": 48000,
+      "channels": 2
+    }
+  ]
+}

@@ -39,9 +39,29 @@ metricsAddress: :9998
 # Paths de ingesta
 # El streamid SRT determina el path: publish:<path> / read:<path>
 # ---------------------------------------------------------------------------
+#
+# Preset FFmpeg normalización EBU R128 (issue #63):
+#   ffmpeg -i <input> -af loudnorm=I=-23:LRA=7:TP=-2 -ar 48000 -c:a aac -b:a 192k <output>
+# Parámetros de loudnorm: I=-23 LUFS, LRA=7 LU, True Peak=-2 dBFS.
+# ---------------------------------------------------------------------------
 paths:
   live-main:
     source: publisher
 
   live-backup:
+    source: publisher
+
+  # issue #63 — Audio principal normalizado EBU R128
+  # codec: mp4a.40.2 (AAC-LC), 48000 Hz, 2 ch, 192 kbps
+  # ffmpeg -i <input> -af loudnorm=I=-23:LRA=7:TP=-2 -ar 48000 -c:a aac -b:a 192k <output>
+  audio-main:
+    source: publisher
+
+  # issue #64 — Audio multi-idioma; PTS alineados al vídeo (live-main)
+  # role MSF: commentary — 96 kbps, 48000 Hz, 2 ch
+  audio-commentary:
+    source: publisher
+
+  # role MSF: audiodescription — 96 kbps, 48000 Hz, 2 ch
+  audio-description:
     source: publisher

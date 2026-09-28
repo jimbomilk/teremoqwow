@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/lipsync-report.json",
+  "title": "LipSyncReport",
+  "description": "Reporte de medición de sincronía audio-vídeo. Generado por el verificador de lip-sync (issue #66). Criterio de paso: av_offset_ms_avg < threshold_ms durante toda la ventana.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["broadcast", "measured_at", "window_sec", "av_offset_ms_avg", "av_offset_ms_max", "threshold_ms", "pass"],
+  "properties": {
+    "broadcast": {
+      "type": "string",
+      "description": "Namespace MoQ del broadcast medido."
+    },
+    "session_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador de la sesión de medición."
+    },
+    "measured_at": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "window_sec": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Duración de la ventana de medición en segundos."
+    },
+    "groups_sampled": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Número de grupos MoQ analizados."
+    },
+    "av_offset_ms_avg": {
+      "type": "number",
+      "description": "Media del offset PTS audio-vídeo en milisegundos. Positivo = audio adelantado."
+    },
+    "av_offset_ms_max": {
+      "type": "number",
+      "description": "Máximo offset absoluto observado en la ventana."
+    },
+    "threshold_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Umbral de paso en milisegundos (SLA: 45ms)."
+    },
+    "pass": {
+      "type": "boolean",
+      "description": "true si av_offset_ms_avg < threshold_ms durante toda la ventana."
+    }
+  }
+}

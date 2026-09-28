@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://teremoqwow.dev/schemas/media/v1/rendition.json",
   "title": "Rendition",
-  "description": "Definición de una calidad de vídeo/audio producida por moq-mux.",
+  "description": "Definición de una calidad de vídeo/audio/subtítulos producida por moq-mux.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "kind", "codec", "bitrate_kbps"],
@@ -14,11 +14,21 @@
     },
     "kind": {
       "type": "string",
-      "enum": ["video", "audio"]
+      "enum": ["video", "audio", "subtitle"]
+    },
+    "role": {
+      "type": "string",
+      "enum": ["main", "commentary", "audiodescription", "sign-language", "alternate"],
+      "description": "Rol MSF del track. Omitir equivale a 'main'."
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$",
+      "description": "Etiqueta BCP 47 del idioma (p.ej. 'es', 'en-GB')."
     },
     "codec": {
       "type": "string",
-      "description": "MIME type con parámetros RFC 6381 (p.ej. 'video/mp4; codecs=\"avc1.640028\"')."
+      "description": "MIME type con parámetros RFC 6381. Para subtítulos: 'wvtt' o 'stpp.ttml.im1t'."
     },
     "bitrate_kbps": {
       "type": "integer",
@@ -49,5 +59,19 @@
       "minimum": 1,
       "description": "Sólo para audio."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "video" } }, "required": ["kind"] },
+      "then": { "required": ["width", "height", "framerate"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "audio" } }, "required": ["kind"] },
+      "then": { "required": ["channels", "sample_rate_hz"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "subtitle" } }, "required": ["kind"] },
+      "then": { "required": ["language"] }
+    }
+  ]
 }
