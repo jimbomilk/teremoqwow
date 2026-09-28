@@ -19,6 +19,10 @@
       "type": "string",
       "enum": ["ascending", "descending"],
       "default": "ascending"
+    },
+    "switching_set_id": {
+      "type": "string",
+      "description": "Identificador del switching set (SWITCHING-SET-ASSIGNMENT). Los tracks con el mismo switching_set_id son alternativas conmutables por el relay en fronteras de grupo."
     }
   }
 }
