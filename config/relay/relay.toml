@@ -70,3 +70,7 @@ log_level = "info"
 #
 # Para verificar que los 3 tracks están anunciados tras arrancar la pipeline:
 #   curl http://localhost:8090/announced/
+#
+# El relay acepta suscripciones con el campo switching_set_id y lo respeta de
+# forma nativa (moq-relay 0.15.x): los subscribers pueden incluirlo para
+# indicar pertenencia a un switching set y el relay conmuta dentro del grupo.
