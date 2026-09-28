@@ -75,22 +75,29 @@ check_command() {
 
 preflight_checks() {
   log_info "Running pre-flight checks..."
-  
-  # Check dependencies
-  for cmd in bash jq awk curl ffmpeg docker docker-compose; do
-    if ! check_command "$cmd"; then
-      log_error "Missing dependency: $cmd"
-      return 1
-    fi
-  done
-  
-  # Check if player is running
-  if ! curl -s http://"${PLAYER_HOST}":"${PLAYER_PORT}" > /dev/null 2>&1; then
-    log_warn "Player not responding at http://${PLAYER_HOST}:${PLAYER_PORT}"
-    log_warn "Make sure player dev server is running: cd player && npm run dev"
+
+  if ! check_command docker; then
+    log_error "docker is required"
     return 1
   fi
-  
+
+  # Require relay running (moq-relay container in teremoqwow-e2e network)
+  if ! docker network ls | grep -q teremoqwow-e2e; then
+    log_error "Docker network 'teremoqwow-e2e' not found."
+    log_error "Start the dev pipeline first: docker compose -f config/relay/... up"
+    return 1
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -q '^moq-relay$'; then
+    log_error "Container 'moq-relay' not running."
+    log_error "Start the dev pipeline before running this script."
+    return 1
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -q '^moq-import$'; then
+    log_error "Container 'moq-import' (SRT import) not running."
+    log_error "Start the dev pipeline before running this script."
+    return 1
+  fi
+
   log_success "Pre-flight checks passed"
   return 0
 }
@@ -131,70 +138,79 @@ generate_test_video() {
 capture_metrics() {
   local duration="$1"
   local output_file="$2"
-  
-  log_info "Capturing latency metrics for ${duration}s..."
-  log_info "Attempting to connect to: $PLAYER_METRICS_URL"
-  
-  # Clear previous data
+  local relay_net="teremoqwow-e2e"
+  local relay_host="moq-relay"
+  local export_name="measure-export"
+  local broadcast="${MEASURE_BROADCAST:-anon/live1}"
+
+  log_info "Starting MoQ export SRT sink for real latency capture..."
   rm -f "$output_file" "$LATENCY_RAW_FILE"
-  
-  # TODO: Asumimos que el player expone WebSocket en /metrics/latency
-  # que emite eventos JSON con campo 'latency_ms'.
-  # 
-  # Placeholder: esperar a que player implemente endpoint.
-  # Por ahora, generamos datos mock para validar el pipeline de análisis.
-  
-  local start_time=$(date +%s)
-  local end_time=$((start_time + duration))
-  local sample_count=0
-  local frame_num=0
-  
-  log_warn "WebSocket capture not yet implemented (player #57 pending)"
-  log_info "Using mock data capture for validation (TODO: replace with real WebSocket)"
-  
-  # Mock capture: simular latencias realistas para Fase 0
-  # En producción, reemplazar con verdadero WebSocket client o server-sent-events
-  while [ "$(date +%s)" -lt "$end_time" ]; do
-    # Generar latencia mock con distribución realista (p50≈410, p95≈650)
-    # Usando awk para muestreo aleatorio
-    local latency=$(awk 'BEGIN {
-      # Distribución gaussiana aproximada p50=410, sigma=80
-      # Para Fase 0, usar distribución simple+bimodal
-      rand_val = rand();
-      if (rand_val < 0.5) {
-        # 50% de muestras cercanas a p50 (350-450ms)
-        latency = 350 + rand() * 100;
-      } else if (rand_val < 0.95) {
-        # 45% en rango medio (450-650ms)
-        latency = 450 + rand() * 200;
-      } else {
-        # 5% en cola (650-900ms) para P95
-        latency = 650 + rand() * 250;
-      }
-      printf "%.0f", latency;
-    }')
-    
-    local timestamp=$(date +%s%N | cut -b1-13)
-    
-    echo "{\"timestamp_ms\": $timestamp, \"latency_ms\": $latency, \"frame_num\": $frame_num}" >> "$LATENCY_RAW_FILE"
-    
-    sample_count=$((sample_count + 1))
-    frame_num=$((frame_num + 1))
-    
-    # Simular ~30fps: 33ms por frame
-    sleep 0.033 || sleep 0.03
-  done
-  
-  log_success "Captured $sample_count latency samples"
-  
-  # Extract latency values from JSON Lines
-  if [ -f "$LATENCY_RAW_FILE" ]; then
-    jq -r '.latency_ms' "$LATENCY_RAW_FILE" > "$output_file" 2>/dev/null || {
-      log_warn "jq extraction failed, using grep fallback"
-      grep -oP 'latency_ms":\s*\K[0-9]+' "$LATENCY_RAW_FILE" > "$output_file" || true
-    }
+
+  # Cleanup de exportador al salir
+  trap 'docker rm -f "$export_name" 2>/dev/null || true' RETURN
+
+  docker rm -f "$export_name" 2>/dev/null || true
+  docker run -d --rm \
+    --name "$export_name" \
+    --network "$relay_net" \
+    moqdev/moq:latest \
+    --connect "tcp://${relay_host}:4444/anon" \
+    --broadcast "$broadcast" \
+    export ts --listen '[::]:9002' >/dev/null 2>&1 || {
+    log_warn "No se pudo arrancar el exportador — abortando captura"
+    return 1
+  }
+
+  sleep 2
+
+  # T_START = epoch ms en el que FFmpeg comenzó a inyectar (exportado desde main)
+  local T_START="${ENCODER_START_MS:-0}"
+  if [[ "$T_START" == "0" ]]; then
+    log_warn "ENCODER_START_MS no definido; T_START = ahora"
+    T_START=$(date +%s%3N)
   fi
-  
+
+  log_info "Midiendo latencia real con ffprobe durante ${duration}s (T_START=${T_START}ms)..."
+
+  # ffprobe consume el SRT, emite frames en formato compact (una línea por frame).
+  # Por cada frame de vídeo calculamos:
+  #   latency = wallclock_recibido - T_START - pts_ms_del_frame
+  # Esto mide el retardo real extremo a extremo a través del stack MoQ.
+  docker run --rm \
+    --network "$relay_net" \
+    linuxserver/ffmpeg:latest \
+    ffprobe -v quiet \
+    -show_frames -select_streams v:0 \
+    -print_format compact \
+    -read_intervals "%+${duration}" \
+    "srt://${export_name}:9002" 2>/dev/null | \
+  while IFS='|' read -ra fields; do
+    T_NOW=$(date +%s%3N)
+    for field in "${fields[@]}"; do
+      if [[ "$field" == pkt_pts_time=* ]]; then
+        pts_s="${field#*=}"
+        latency_ms=$(python3 -c "
+import sys
+try:
+    t_start = int($T_START)
+    t_now = int($T_NOW)
+    pts_ms = int(float('$pts_s') * 1000)
+    lat = t_now - t_start - pts_ms
+    print(max(0, lat))
+except:
+    print(0)
+" 2>/dev/null || echo 0)
+        if [[ "$latency_ms" -gt 0 && "$latency_ms" -lt 10000 ]]; then
+          echo "$latency_ms" >> "$output_file"
+          echo "{\"timestamp_ms\": $T_NOW, \"latency_ms\": $latency_ms}" >> "$LATENCY_RAW_FILE"
+        fi
+      fi
+    done
+  done
+
+  local sample_count=0
+  [[ -f "$output_file" ]] && sample_count=$(wc -l < "$output_file")
+  log_success "Capturadas $sample_count muestras de latencia real"
   return 0
 }
 
@@ -213,10 +229,7 @@ analyze_latency() {
   log_info "Analyzing latency data from: $input_file"
   
   local sample_count=$(wc -l < "$input_file")
-  
-  # TODO: Si el sample_count es bajo, it puede ser porque el player no emitió eventos.
-  # En Fase 0, esto es aceptable; esperamos que issue #57 implemente emisión.
-  
+
   # Calcular percentiles con sort + awk
   local percentiles=$(sort -n "$input_file" | awk -v n="$sample_count" '
     BEGIN {
@@ -293,8 +306,8 @@ analyze_latency() {
       echo "     - Check player decode: browser dev tools → Performance tab"
     fi
     if [ "$sample_count" -lt "$MIN_SAMPLES" ]; then
-      echo "     - Player metrics endpoint not yet active (issue #57)"
-      echo "     - Expected WebSocket at $PLAYER_METRICS_URL"
+      echo "     - Pocas muestras: verifica que moq-import y moq-relay están activos"
+      echo "     - Aumenta --duration o comprueba la red teremoqwow-e2e"
     fi
     echo ""
   fi
@@ -361,37 +374,47 @@ EOF
   # Full run mode: preflight → generate video → capture → analyze
   
   if ! preflight_checks; then
-    log_error "Pre-flight checks failed. Please ensure:"
-    echo "  1. Docker containers are running (config/*/docker-compose up)"
-    echo "  2. Player dev server is running (player, npm run dev)"
+    log_error "Pre-flight checks failed. Asegúrate de que la pipeline dev está arriba:"
+    echo "  docker compose -f config/relay/docker-compose.yml up -d"
     exit 1
   fi
-  
-  if ! generate_test_video; then
-    log_error "Failed to generate test video"
+
+  # Inyectar video real via FFmpeg testsrc → SRT → moq-import
+  log_info "Arrancando inyector FFmpeg (testsrc → SRT → moq-import)..."
+  docker rm -f measure-ffmpeg 2>/dev/null || true
+  ENCODER_START_MS=$(date +%s%3N)
+  export ENCODER_START_MS
+  docker run -d --rm \
+    --name measure-ffmpeg \
+    --network teremoqwow-e2e \
+    linuxserver/ffmpeg:latest \
+    -re \
+    -f lavfi -i "testsrc2=size=1280x720:rate=30" \
+    -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
+    -c:v libx264 -preset ultrafast -tune zerolatency \
+    -c:a aac -b:a 128k \
+    -f mpegts "srt://moq-import:8890?mode=call&latency=200" \
+    > "$ENCODER_LOG" 2>&1 || {
+    log_error "No se pudo arrancar el inyector FFmpeg"
     exit 1
-  fi
-  
-  # TODO: Implementar inyección de vídeo en SRT bond
-  # Por ahora, asumimos vídeo ya está being fed (manual o por encoder mock externo)
-  # log_info "Injecting test video into SRT bond..."
-  # ffmpeg -re -i "$TEST_VIDEO" -c:v copy -c:a copy -f mpegts \
-  #   srt://localhost:8891?mode=send &
-  # ENCODER_PID=$!
-  # sleep 2  # Dar tiempo a que fluya el stream
-  
+  }
+  log_info "Inyector FFmpeg arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s..."
+  sleep 3
+
+  # Capturar latencia real con ffprobe en el extremo de salida
   capture_metrics "$DURATION" "$LATENCY_OUTPUT_FILE"
-  
-  # Kill encoder mock if started
-  # if [ -n "${ENCODER_PID:-}" ]; then
-  #   kill "$ENCODER_PID" 2>/dev/null || true
-  # fi
-  
+  local capture_result=$?
+
+  # Detener inyector
+  docker rm -f measure-ffmpeg 2>/dev/null || true
+
+  [[ $capture_result -ne 0 ]] && { log_error "Captura fallida"; exit 1; }
+
   analyze_latency "$LATENCY_OUTPUT_FILE"
   local result=$?
-  
-  log_info "Detailed results saved to: $LATENCY_OUTPUT_FILE"
-  
+
+  log_info "Resultados detallados: $LATENCY_OUTPUT_FILE"
+
   return $result
 }
 
