@@ -63,22 +63,18 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${RELAY_HOST}$"; then
   echo "[INTEGRATION] ERROR: contenedor '${RELAY_HOST}' no está corriendo." >&2
   exit 1
 fi
-if ! docker ps --format '{{.Names}}' | grep -q '^moq-import$'; then
-  echo "[INTEGRATION] ERROR: contenedor 'moq-import' no está corriendo." >&2
-  exit 1
-fi
-
 log "Pipeline activa: OK"
 
 ##############################################################################
-# 1. Inyectar video real con FFmpeg testsrc2 → SRT → moq-import
+# 1. Inyectar video real: FFmpeg testsrc2 → stdout → moq import ts
 ##############################################################################
 
-log "Arrancando inyector de video real (FFmpeg testsrc2)..."
-docker rm -f integ-ffmpeg 2>/dev/null || true
+log "Arrancando inyector de video real (FFmpeg testsrc2 → pipe → moq import ts)..."
+docker rm -f integ-ffmpeg integ-moq-sync 2>/dev/null || true
 ENCODER_START_MS=$(date +%s%3N)
 export ENCODER_START_MS
 
+# Pipe: ffmpeg genera MPEG-TS en stdout; moq import ts lo lee por stdin.
 docker run -d --rm \
   --name integ-ffmpeg \
   --network "$DOCKER_NET" \
@@ -90,11 +86,46 @@ docker run -d --rm \
   -profile:v main -level 4.0 \
   -g 60 -keyint_min 60 \
   -c:a aac -b:a 128k \
-  -f mpegts "srt://moq-import:8890?mode=call&latency=200" \
-  >/dev/null 2>&1 || { echo "[INTEGRATION] ERROR: no se pudo arrancar FFmpeg" >&2; exit 1; }
+  -f mpegts pipe:1 2>/dev/null | \
+docker run --rm -i \
+  --network "$DOCKER_NET" \
+  moqdev/moq:latest \
+  --connect "tcp://${RELAY_HOST}:4444/anon" \
+  --broadcast "${BROADCAST}" \
+  import ts &
+INJECTOR_PID=$!
 
-log "FFmpeg arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s para estabilizar..."
-sleep 3
+log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 4s para estabilizar..."
+sleep 4
+
+##############################################################################
+# 1b. Publicar track de sincronía (pulsos cada 1s)
+##############################################################################
+
+log "Arrancando publicador de track sync..."
+(
+  SEQ=0
+  while true; do
+    TS=$(date +%s%3N)
+    echo "{\"seq\":${SEQ},\"ts_ms\":${TS}}" | \
+      docker run --rm -i --network "$DOCKER_NET" moqdev/moq:latest \
+        --connect "tcp://${RELAY_HOST}:4444/anon" \
+        --broadcast "${BROADCAST}" \
+        publish sync 2>/dev/null || true
+    SEQ=$((SEQ + 1))
+    sleep 1
+  done
+) &
+SYNC_PID=$!
+cleanup_orig=$(declare -f cleanup)
+cleanup() {
+  log "Cleanup..."
+  kill "$SYNC_PID" 2>/dev/null || true
+  kill "$INJECTOR_PID" 2>/dev/null || true
+  docker rm -f integ-ffmpeg integ-moq-sync 2>/dev/null || true
+  [[ "${NETEM_APPLIED:-0}" == "1" ]] && sudo tc qdisc del dev lo root 2>/dev/null || true
+}
+sleep 1
 
 ##############################################################################
 # 2. Aplicar degradación de red (opcional)

@@ -110,49 +110,41 @@ if ! check_relay; then
   exit 0
 fi
 
-log "Starting SRT export container from relay..."
+log "Exporting MoQ stream via pipe → ffprobe (${WINDOW_SEC}s)..."
 
-# Arrancar export MoQ → SRT
-docker run -d --rm \
-  --name "$EXPORT_CONTAINER" \
+# moq export ts escribe MPEG-TS en stdout; ffprobe lo lee desde stdin.
+# Se capturan vídeo y audio en una sola pasada para evitar dos conexiones.
+FRAMES_JSON=$(docker run --rm \
   --network teremoqwow-e2e \
   moqdev/moq:latest \
   --connect "tcp://${RELAY_HOST}:4444/anon" \
   --broadcast "${BROADCAST}" \
-  export ts --listen '[::]:'"${EXPORT_PORT}" \
-  >/dev/null 2>&1 || {
-  warn "failed to start export container — using offset 0ms"
-  generate_report "0" "0" "true"
-  log "PASS (export failed, defaulting to 0ms)"
-  exit 0
-}
-
-log "Waiting for SRT export to be ready..."
-sleep 2
-
-log "Capturing video frames with ffprobe for ${WINDOW_SEC}s..."
-
-# Capturar frames de vídeo con ffprobe
-VIDEO_JSON=$(docker run --rm \
+  export ts 2>/dev/null | \
+docker run --rm -i \
   --network teremoqwow-e2e \
   linuxserver/ffmpeg:latest \
   ffprobe -v quiet \
   -read_intervals "%+${WINDOW_SEC}" \
-  -show_frames -select_streams v:0 \
+  -show_frames \
   -print_format json \
-  "srt://${EXPORT_CONTAINER}:${EXPORT_PORT}" 2>/dev/null || echo '{"frames":[]}')
+  pipe:0 2>/dev/null || echo '{"frames":[]}')
 
-log "Capturing audio frames with ffprobe for ${WINDOW_SEC}s..."
+# Extraer primer frame de vídeo y primer frame de audio del JSON combinado
+VIDEO_JSON=$(python3 -c "
+import json, sys
+try:
+  d = json.loads('''${FRAMES_JSON}''')
+  vf = [f for f in d.get('frames', []) if f.get('media_type') == 'video']
+  print(json.dumps({'frames': vf[:1]}))
+except: print('{\"frames\":[]}')" 2>/dev/null || echo '{"frames":[]}')
 
-# Capturar frames de audio con ffprobe
-AUDIO_JSON=$(docker run --rm \
-  --network teremoqwow-e2e \
-  linuxserver/ffmpeg:latest \
-  ffprobe -v quiet \
-  -read_intervals "%+${WINDOW_SEC}" \
-  -show_frames -select_streams a:0 \
-  -print_format json \
-  "srt://${EXPORT_CONTAINER}:${EXPORT_PORT}" 2>/dev/null || echo '{"frames":[]}')
+AUDIO_JSON=$(python3 -c "
+import json, sys
+try:
+  d = json.loads('''${FRAMES_JSON}''')
+  af = [f for f in d.get('frames', []) if f.get('media_type') == 'audio']
+  print(json.dumps({'frames': af[:1]}))
+except: print('{\"frames\":[]}')" 2>/dev/null || echo '{"frames":[]}')
 
 log "Parsing PTS from frames..."
 
