@@ -1,0 +1,6 @@
+{
+  "track_name": "subs_stpp_en",
+  "codec": "stpp.ttml.im1t",
+  "language": "en",
+  "note": "TTML in CMAF per ISO 14496-30"
+}
