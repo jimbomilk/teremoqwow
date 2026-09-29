@@ -114,89 +114,76 @@ log "Exporting MoQ stream via pipe → ffprobe (${WINDOW_SEC}s)..."
 
 # moq export ts escribe MPEG-TS en stdout; ffprobe lo lee desde stdin.
 # Se capturan vídeo y audio en una sola pasada para evitar dos conexiones.
-FRAMES_JSON=$(docker run --rm \
-  --network teremoqwow-e2e \
-  moqdev/moq:latest \
-  --connect "tcp://${RELAY_HOST}:4444/anon" \
-  --broadcast "${BROADCAST}" \
-  export ts 2>/dev/null | \
-docker run --rm -i \
-  --network teremoqwow-e2e \
-  linuxserver/ffmpeg:latest \
-  ffprobe -v quiet \
-  -read_intervals "%+${WINDOW_SEC}" \
-  -show_frames \
-  -print_format json \
-  pipe:0 2>/dev/null || echo '{"frames":[]}')
+# timeout previene que el pipe bloquee indefinidamente si el broadcast no tiene datos.
+# ffprobe local escribe JSON a tempfile; se parsea leyendo el archivo (evita
+# los problemas de interpolar un JSON multi-KB en heredocs de python -c).
+_TMPJSON=$(mktemp)
+docker run --rm \
+    --network teremoqwow-e2e \
+    moqdev/moq:0.12.7 \
+    --connect "tcp://${RELAY_HOST}:4444/anon" \
+    --broadcast "${BROADCAST}" \
+    export ts 2>/dev/null | \
+timeout $((WINDOW_SEC + 5)) ffprobe \
+    -v quiet \
+    -read_intervals "%+${WINDOW_SEC}" \
+    -show_frames \
+    -print_format json \
+    pipe:0 2>/dev/null > "$_TMPJSON" || true
 
-# Extraer primer frame de vídeo y primer frame de audio del JSON combinado
-VIDEO_JSON=$(python3 -c "
-import json, sys
+log "Parsing PTS from frames ($(wc -c < "$_TMPJSON") bytes)..."
+
+# Calcular offset A/V como la mediana de |audio_pts - video_pts| emparejando
+# cada frame de audio con el frame de video más cercano en el tiempo.
+# Esto refleja el desalineamiento real, no la latencia entre primeros grupos.
+_PTS_OUT=$(python3 - "$_TMPJSON" <<'PYEOF'
+import json, sys, re
 try:
-  d = json.loads('''${FRAMES_JSON}''')
-  vf = [f for f in d.get('frames', []) if f.get('media_type') == 'video']
-  print(json.dumps({'frames': vf[:1]}))
-except: print('{\"frames\":[]}')" 2>/dev/null || echo '{"frames":[]}')
-
-AUDIO_JSON=$(python3 -c "
-import json, sys
-try:
-  d = json.loads('''${FRAMES_JSON}''')
-  af = [f for f in d.get('frames', []) if f.get('media_type') == 'audio']
-  print(json.dumps({'frames': af[:1]}))
-except: print('{\"frames\":[]}')" 2>/dev/null || echo '{"frames":[]}')
-
-log "Parsing PTS from frames..."
-
-# Extraer PTS del primer frame de video y audio
-# Usamos un subshell con eval para pasar el JSON sin problemas
-VIDEO_PTS=$(python3 -c "
-import json
-try:
-  data = json.loads('''$VIDEO_JSON''')
-  if data.get('frames') and len(data['frames']) > 0:
-    frame = data['frames'][0]
-    pts = frame.get('pkt_pts_time') or frame.get('best_effort_timestamp_time')
-    if pts is not None:
-      print(float(pts))
-    else:
-      print('0')
-  else:
-    print('0')
-except:
-  print('0')
-")
-
-AUDIO_PTS=$(python3 -c "
-import json
-try:
-  data = json.loads('''$AUDIO_JSON''')
-  if data.get('frames') and len(data['frames']) > 0:
-    frame = data['frames'][0]
-    pts = frame.get('pkt_pts_time') or frame.get('best_effort_timestamp_time')
-    if pts is not None:
-      print(float(pts))
-    else:
-      print('0')
-  else:
-    print('0')
-except:
-  print('0')
-")
-
-log "Video PTS: ${VIDEO_PTS}s, Audio PTS: ${AUDIO_PTS}s"
-
-# Calcular offset en ms
-AV_OFFSET_AVG=$(python3 << PYTHON_CALC
-import math
-video_pts = float("${VIDEO_PTS}")
-audio_pts = float("${AUDIO_PTS}")
-av_offset_ms = abs(audio_pts - video_pts) * 1000
-print(int(round(av_offset_ms)))
-PYTHON_CALC
+    with open(sys.argv[1]) as f:
+        raw = f.read()
+except Exception:
+    print("0 0 0"); sys.exit()
+# ffprobe puede truncarse si timeout lo mata: extraer solo objetos frame completos.
+frames = []
+for m in re.finditer(r'\{\s*"media_type"\s*:.*?\}', raw, re.DOTALL):
+    try:
+        frames.append(json.loads(m.group(0)))
+    except Exception:
+        continue
+def pts_of(fr):
+    v = fr.get("pts_time") or fr.get("pkt_pts_time") or fr.get("best_effort_timestamp_time")
+    return float(v) if v is not None else None
+vpts = sorted(p for p in (pts_of(f) for f in frames if f.get("media_type")=="video") if p is not None)
+apts = sorted(p for p in (pts_of(f) for f in frames if f.get("media_type")=="audio") if p is not None)
+if not vpts or not apts:
+    print(f"{vpts[0] if vpts else 0} {apts[0] if apts else 0} 0"); sys.exit()
+import bisect
+diffs = []
+for a in apts:
+    i = bisect.bisect_left(vpts, a)
+    cand = []
+    if i < len(vpts): cand.append(vpts[i])
+    if i > 0:         cand.append(vpts[i-1])
+    diffs.append(min(abs(a - v) for v in cand))
+diffs.sort()
+median_ms = int(round(diffs[len(diffs)//2] * 1000))
+print(f"{vpts[0]} {apts[0]} {median_ms}")
+PYEOF
 )
+rm -f "$_TMPJSON"
 
-# Para este test, max = avg (single measurement)
+read -r VIDEO_PTS AUDIO_PTS AV_MEDIAN_MS <<< "$_PTS_OUT"
+
+log "Video PTS: ${VIDEO_PTS}s, Audio PTS: ${AUDIO_PTS}s, A/V median offset: ${AV_MEDIAN_MS}ms"
+
+# Si ambos PTS son 0 significa que no se recibieron frames (broadcast sin datos)
+if [[ "${VIDEO_PTS}" == "0" && "${AUDIO_PTS}" == "0" ]]; then
+  generate_report "0" "0" "false"
+  log "FAIL: no frames received (broadcast not publishing data)"
+  exit 1
+fi
+
+AV_OFFSET_AVG="${AV_MEDIAN_MS:-0}"
 AV_OFFSET_MAX="$AV_OFFSET_AVG"
 
 log "A/V offset: ${AV_OFFSET_AVG}ms (threshold: ${THRESHOLD_MS}ms)"

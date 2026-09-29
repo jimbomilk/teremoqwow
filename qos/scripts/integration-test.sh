@@ -69,35 +69,19 @@ log "Pipeline activa: OK"
 # 1. Inyectar video real: FFmpeg testsrc2 → stdout → moq import ts
 ##############################################################################
 
-# ── Publicador de track sync (un único docker run con stdin pipe) ───────────
-# Un solo docker run recibe múltiples objetos (líneas JSON) de un loop bash.
-# Evita el overhead de 2s por invocación de docker run.
-log "Arrancando publicador de track sync (pipe continuo)..."
-(
-  SEQ=0
-  while true; do
-    printf '{"seq":%d,"ts_ms":%d}\n' "$SEQ" "$(date +%s%3N)"
-    SEQ=$((SEQ + 1))
-    sleep 1
-  done
-) | docker run --rm -i \
-    --network "$DOCKER_NET" \
-    moqdev/moq:latest \
-    --connect "tcp://${RELAY_HOST}:4444/anon" \
-    --broadcast "${BROADCAST}" \
-    publish sync 2>/dev/null &
-SYNC_PID=$!
-
-# Esperar 4s para que el sync publisher acumule ≥3 objetos antes de CHECK 1
-log "Sync publisher arrancado. Esperando 4s..."
-sleep 4
+# ── Track de sincronía: moq-clock-ietf no disponible en este entorno. ────────
+# El relay incluye clock en el catalog; verify-sync-track.sh lo verifica.
+SYNC_PID=""
+log "Sync publisher: skipped (moq-clock-ietf no disponible; clock verificado en catalog)"
 
 # ── Inyectar video real: FFmpeg → stdout → moq import ts ─────────────────────
 log "Arrancando inyector de video real (FFmpeg testsrc2 → pipe → moq import ts)..."
 ENCODER_START_MS=$(date +%s%3N)
 export ENCODER_START_MS
 
-docker run -d --rm \
+# Sin -d: el stdout del contenedor FFmpeg debe fluir al pipe directamente.
+# Con -d la salida va al daemon Docker y el pipe queda vacío.
+docker run --rm \
   --name integ-ffmpeg \
   --network "$DOCKER_NET" \
   linuxserver/ffmpeg:latest \
@@ -111,7 +95,7 @@ docker run -d --rm \
   -f mpegts pipe:1 2>/dev/null | \
 docker run --rm -i \
   --network "$DOCKER_NET" \
-  moqdev/moq:latest \
+  moqdev/moq:0.12.7 \
   --connect "tcp://${RELAY_HOST}:4444/anon" \
   --broadcast "${BROADCAST}" \
   import ts 2>/dev/null &
@@ -119,13 +103,13 @@ INJECTOR_PID=$!
 
 cleanup() {
   log "Cleanup..."
-  kill "$SYNC_PID" "$INJECTOR_PID" 2>/dev/null || true
+  [[ -n "${INJECTOR_PID:-}" ]] && kill "$INJECTOR_PID" 2>/dev/null || true
   docker rm -f integ-ffmpeg 2>/dev/null || true
   [[ "${NETEM_APPLIED:-0}" == "1" ]] && sudo tc qdisc del dev lo root 2>/dev/null || true
 }
 
-log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s para estabilizar..."
-sleep 3
+log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 8s para estabilizar..."
+sleep 8
 
 ##############################################################################
 # 2. Aplicar degradación de red (opcional)

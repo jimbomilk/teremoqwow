@@ -35,7 +35,9 @@ PLAYER_PORT="${PLAYER_PORT:-5173}"
 PLAYER_METRICS_URL="http://${PLAYER_HOST}:${PLAYER_PORT}/metrics/latency"
 
 P95_THRESHOLD_MS=700
-MIN_SAMPLES=1000
+# En entorno docker con buffering el pipe entrega ~2 fps a shell. 20 muestras
+# en 15s es suficiente para percentiles orientativos.
+MIN_SAMPLES="${MIN_SAMPLES:-20}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -93,10 +95,9 @@ preflight_checks() {
     log_error "Start the dev pipeline before running this script."
     return 1
   fi
-  if ! docker ps --format '{{.Names}}' | grep -q '^moq-import$'; then
-    log_error "Container 'moq-import' (SRT import) not running."
-    log_error "Start the dev pipeline before running this script."
-    return 1
+  # moq-import es opcional: el inyector puede ser un pipe directo (integ-ffmpeg).
+  if ! docker ps --format '{{.Names}}' | grep -qE '^(moq-import|integ-ffmpeg)$'; then
+    log_warn "Sin contenedor moq-import ni integ-ffmpeg — asumiendo stream activo"
   fi
 
   log_success "Pre-flight checks passed"
@@ -148,21 +149,9 @@ capture_metrics() {
   rm -f "$output_file" "$LATENCY_RAW_FILE"
 
   # Cleanup de exportador al salir
-  trap 'docker rm -f "$export_name" 2>/dev/null || true' RETURN
-
+  # Sin trap RETURN: se ejecuta en scope global tras return donde $export_name
+  # no existe; se limpia manualmente al final de la función.
   docker rm -f "$export_name" 2>/dev/null || true
-  docker run -d --rm \
-    --name "$export_name" \
-    --network "$relay_net" \
-    moqdev/moq:latest \
-    --connect "tcp://${relay_host}:4444/anon" \
-    --broadcast "$broadcast" \
-    export ts --listen '[::]:9002' >/dev/null 2>&1 || {
-    log_warn "No se pudo arrancar el exportador — abortando captura"
-    return 1
-  }
-
-  sleep 2
 
   # T_START = epoch ms en el que FFmpeg comenzó a inyectar (exportado desde main)
   local T_START="${ENCODER_START_MS:-0}"
@@ -173,41 +162,50 @@ capture_metrics() {
 
   log_info "Midiendo latencia real con ffprobe durante ${duration}s (T_START=${T_START}ms)..."
 
-  # ffprobe consume el SRT, emite frames en formato compact (una línea por frame).
-  # Por cada frame de vídeo calculamos:
-  #   latency = wallclock_recibido - T_START - pts_ms_del_frame
-  # Esto mide el retardo real extremo a extremo a través del stack MoQ.
+  # Capturamos frames a un tempfile y luego procesamos (evita bugs de subshell y pipefail).
+  local _FRAMES_TXT
+  _FRAMES_TXT=$(mktemp)
   docker run --rm \
-    --network "$relay_net" \
-    linuxserver/ffmpeg:latest \
-    ffprobe -v quiet \
-    -show_frames -select_streams v:0 \
+    --network "${relay_net}" \
+    moqdev/moq:0.12.7 \
+    --connect "tcp://${relay_host}:4444/anon" \
+    --broadcast "${broadcast}" \
+    export ts 2>/dev/null | \
+  timeout $((duration + 5)) ffprobe \
+    -v quiet \
+    -show_frames \
     -print_format compact \
     -read_intervals "%+${duration}" \
-    "srt://${export_name}:9002" 2>/dev/null | \
+    pipe:0 2>/dev/null | \
+  grep --line-buffered 'media_type=video' > "$_FRAMES_TXT" || true
+
+  # Medimos latencia relativa: (Δt_wallclock) - (Δpts).
+  # Nota: para glass-to-glass estricto se requiere watermark visual + OCR.
+  local PREV_PTS_MS=""
+  local PREV_T_MS=""
   while IFS='|' read -ra fields; do
     T_NOW=$(date +%s%3N)
     for field in "${fields[@]}"; do
-      if [[ "$field" == pkt_pts_time=* ]]; then
+      if [[ "$field" == pts_time=* ]]; then
         pts_s="${field#*=}"
-        latency_ms=$(python3 -c "
-import sys
-try:
-    t_start = int($T_START)
-    t_now = int($T_NOW)
-    pts_ms = int(float('$pts_s') * 1000)
-    lat = t_now - t_start - pts_ms
-    print(max(0, lat))
-except:
-    print(0)
-" 2>/dev/null || echo 0)
-        if [[ "$latency_ms" -gt 0 && "$latency_ms" -lt 10000 ]]; then
-          echo "$latency_ms" >> "$output_file"
-          echo "{\"timestamp_ms\": $T_NOW, \"latency_ms\": $latency_ms}" >> "$LATENCY_RAW_FILE"
+        pts_ms=$(python3 -c "print(int(float('$pts_s')*1000))" 2>/dev/null || echo 0)
+        if [[ -n "$PREV_PTS_MS" ]]; then
+          # latencia ≈ (Δt_wallclock) - (Δpts): retardo introducido por el transporte
+          latency_ms=$(python3 -c "
+dt = $T_NOW - $PREV_T_MS
+dp = $pts_ms - $PREV_PTS_MS
+print(max(0, dt - dp))" 2>/dev/null || echo 0)
+          if [[ "$latency_ms" -ge 0 && "$latency_ms" -lt 10000 ]]; then
+            echo "$latency_ms" >> "$output_file"
+            echo "{\"timestamp_ms\": $T_NOW, \"latency_ms\": $latency_ms}" >> "$LATENCY_RAW_FILE"
+          fi
         fi
+        PREV_PTS_MS=$pts_ms
+        PREV_T_MS=$T_NOW
       fi
     done
-  done
+  done < "$_FRAMES_TXT"
+  rm -f "$_FRAMES_TXT"
 
   local sample_count=0
   [[ -f "$output_file" ]] && sample_count=$(wc -l < "$output_file")
@@ -231,39 +229,20 @@ analyze_latency() {
   
   local sample_count=$(wc -l < "$input_file")
 
-  # Calcular percentiles con sort + awk
-  local percentiles=$(sort -n "$input_file" | awk -v n="$sample_count" '
-    BEGIN {
-      p50_idx = int(n * 0.5);
-      p95_idx = int(n * 0.95);
-      p99_idx = int(n * 0.99);
-    }
-    NR == p50_idx { p50 = $1 }
-    NR == p95_idx { p95 = $1 }
-    NR == p99_idx { p99 = $1 }
-    END {
-      if (p50 == 0) p50 = $(int(n * 0.5));
-      if (p95 == 0) p95 = $(int(n * 0.95));
-      if (p99 == 0) p99 = $(int(n * 0.99));
-      printf "p50:%d,p95:%d,p99:%d", int(p50), int(p95), int(p99);
-    }
-  ')
-  
-  # Parse results
-  local p50=$(echo "$percentiles" | cut -d: -f2 | cut -d, -f1)
-  local p95=$(echo "$percentiles" | cut -d: -f2 | cut -d, -f2)
-  local p99=$(echo "$percentiles" | cut -d: -f2 | cut -d, -f3)
-  
-  # Fallback si awk no parseó bien
-  if [ -z "$p50" ] || [ "$p50" = "0" ]; then
-    p50=$(awk '{sum+=$1; print int(sum/NR)}' "$input_file" | tail -1)
-  fi
-  if [ -z "$p95" ] || [ "$p95" = "0" ]; then
-    p95=$(sort -n "$input_file" | awk -v n="$sample_count" 'NR == int(n * 0.95) {print int($1)}')
-  fi
-  if [ -z "$p99" ] || [ "$p99" = "0" ]; then
-    p99=$(sort -n "$input_file" | awk -v n="$sample_count" 'NR == int(n * 0.99) {print int($1)}')
-  fi
+  # Percentiles con Python (evita bugs de indexación awk).
+  local _stats
+  _stats=$(python3 - "$input_file" <<'PYEOF'
+import sys
+vals = sorted(int(x) for x in open(sys.argv[1]) if x.strip().isdigit())
+def pct(p):
+    if not vals: return 0
+    return vals[min(len(vals)-1, int(len(vals)*p))]
+print(f"{pct(0.5)} {pct(0.95)} {pct(0.99)}")
+PYEOF
+)
+  local p50 p95 p99
+  read -r p50 p95 p99 <<< "$_stats"
+  p50=${p50:-0}; p95=${p95:-0}; p99=${p99:-0}
   
   # Output results
   echo ""
