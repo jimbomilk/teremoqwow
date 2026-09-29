@@ -65,7 +65,9 @@ sleep 1
 #
 #    SPS/PPS alineados entre calidades:
 #      - Perfil H.264 main en los 3 streams; sólo varía el level (4.0/3.1/3.0).
-#      - -force_key_frames sincroniza IDRs exactos cada 2 s en los 3 streams.
+#      - GOP de 1 s (30 frames @30fps): límite teórico de latencia MoQ = 1 GOP.
+#        Con 2 s (60 frames) el subscriber espera hasta 2000 ms extra (issue #133).
+#      - -force_key_frames sincroniza IDRs exactos cada 1 s en los 3 streams.
 #      - -sc_threshold 0 evita IDRs extra por cambio de escena que
 #        desalinearían los GOP entre calidades.
 #      - -x264-params nal-hrd=cbr:force-cfr=1 garantiza PTS síncronos.
@@ -89,24 +91,24 @@ ffmpeg -hide_banner -loglevel warning \
   -c:v:0 libx264 -preset:v:0 ultrafast -tune:v:0 zerolatency \
   -profile:v:0 main -level:v:0 4.0 \
   -s:v:0 1280x720 -b:v:0 2500k \
-  -g:v:0 60 -keyint_min:v:0 60 -sc_threshold:v:0 0 \
-  -force_key_frames:v:0 "expr:gte(t,n_forced*2)" \
+  -g:v:0 30 -keyint_min:v:0 30 -sc_threshold:v:0 0 \
+  -force_key_frames:v:0 "expr:gte(t,n_forced*1)" \
   -x264-params:v:0 "nal-hrd=cbr:force-cfr=1" \
   -pix_fmt:v:0 yuv420p \
   \
   -c:v:1 libx264 -preset:v:1 ultrafast -tune:v:1 zerolatency \
   -profile:v:1 main -level:v:1 3.1 \
   -s:v:1 854x480 -b:v:1 1200k \
-  -g:v:1 60 -keyint_min:v:1 60 -sc_threshold:v:1 0 \
-  -force_key_frames:v:1 "expr:gte(t,n_forced*2)" \
+  -g:v:1 30 -keyint_min:v:1 30 -sc_threshold:v:1 0 \
+  -force_key_frames:v:1 "expr:gte(t,n_forced*1)" \
   -x264-params:v:1 "nal-hrd=cbr:force-cfr=1" \
   -pix_fmt:v:1 yuv420p \
   \
   -c:v:2 libx264 -preset:v:2 ultrafast -tune:v:2 zerolatency \
   -profile:v:2 main -level:v:2 3.0 \
   -s:v:2 640x360 -b:v:2 600k \
-  -g:v:2 60 -keyint_min:v:2 60 -sc_threshold:v:2 0 \
-  -force_key_frames:v:2 "expr:gte(t,n_forced*2)" \
+  -g:v:2 30 -keyint_min:v:2 30 -sc_threshold:v:2 0 \
+  -force_key_frames:v:2 "expr:gte(t,n_forced*1)" \
   -x264-params:v:2 "nal-hrd=cbr:force-cfr=1" \
   -pix_fmt:v:2 yuv420p \
   \
