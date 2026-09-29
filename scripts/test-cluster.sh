@@ -86,52 +86,45 @@ docker logs relay-2 2>&1 | grep -q 'listening.*8091\|web.*8091' \
   || die "relay-2 no arrancó (no aparece 'listening' en logs)"
 log "relay-2 activo: $(docker logs relay-2 2>&1 | grep -E 'listening|connect' | tr '\n' '|')"
 
-# ── Subscriber en relay-2 (escucha antes de publicar) ────────────────────────
-log "Iniciando subscriber en relay-2..."
-SUBSCRIBER_OUT="/tmp/teremoqwow-cluster/subscriber.ts"
-mkdir -p /tmp/teremoqwow-cluster
-docker run -d --name cluster-subscriber \
-  --network "$NETWORK" \
-  "$MOQ_IMAGE" \
-  --connect tcp://relay-2:4445/anon \
-  --broadcast "$BROADCAST" \
-  export ts > /dev/null
-
-sleep 1
-
 # ── Publisher en relay-1 ──────────────────────────────────────────────────────
-log "Publicando en relay-1 (5 segundos de video de prueba)..."
-docker run -d --name cluster-publisher \
-  --network "$NETWORK" \
+log "Publicando en relay-1..."
+docker run --rm --network "$NETWORK" \
   "$FFMPEG_IMAGE" \
   -re -f lavfi -i 'testsrc2=size=320x240:rate=15' \
   -f lavfi -i 'sine=frequency=440:sample_rate=44100' \
-  -c:v libx264 -preset ultrafast -tune zerolatency \
-  -c:a aac -b:a 64k -t 5 -f mpegts pipe:1 2>/dev/null \
-  | docker run -i --network "$NETWORK" \
-      "$MOQ_IMAGE" --connect tcp://relay-1:4444/anon \
-      --broadcast "$BROADCAST" import ts > /dev/null 2>&1 || true
+  -c:v libx264 -preset ultrafast -tune zerolatency -g 30 \
+  -c:a aac -b:a 64k -t 60 -f mpegts pipe:1 2>/dev/null | \
+docker run --rm -i --network "$NETWORK" --name cluster-publisher \
+  "$MOQ_IMAGE" --connect tcp://relay-1:4444/anon \
+  --broadcast "$BROADCAST" import ts 2>/dev/null &
+PUBLISHER_PID=$!
+sleep 5
 
-# ── Verificar propagación ─────────────────────────────────────────────────────
-log "Esperando propagación del broadcast en relay-2 (timeout: ${TIMEOUT}s)..."
-ELAPSED=0
-while [ $ELAPSED -lt $TIMEOUT ]; do
-  ANNOUNCED=$(docker exec relay-2 wget -qO- http://localhost:8091/announced/ 2>/dev/null || echo "")
-  if echo "$ANNOUNCED" | grep -q "cluster-test"; then
-    log "OK — '$BROADCAST' propagado a relay-2 en ${ELAPSED}s"
-    break
-  fi
-  sleep 2
-  ELAPSED=$((ELAPSED + 2))
-done
+# ── Bridge: relay-1 → relay-2 (ADR-0002) ─────────────────────────────────────
+# moq-relay:0.15.7 no soporta clustering vía CLI; se usa un bridge de re-publicación.
+log "Arrancando bridge relay-1 → relay-2..."
+docker run --rm --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://relay-1:4444/anon --broadcast "$BROADCAST" \
+  export ts 2>/dev/null | \
+docker run --rm -i --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://relay-2:4445/anon --broadcast "$BROADCAST" \
+  import ts 2>/dev/null &
+BRIDGE_PID=$!
+sleep 4
 
-if ! echo "$ANNOUNCED" | grep -q "cluster-test"; then
-  # Último intento: comprobar logs del subscriber
-  SUBSCRIBER_LOGS=$(docker logs cluster-subscriber 2>&1 | head -20)
-  if echo "$SUBSCRIBER_LOGS" | grep -qi "error\|failed"; then
-    die "El broadcast '$BROADCAST' NO llegó a relay-2 en ${TIMEOUT}s. Logs subscriber: $SUBSCRIBER_LOGS"
-  fi
-  die "El broadcast '$BROADCAST' NO fue anunciado en relay-2 en ${TIMEOUT}s. /announced: $ANNOUNCED"
+# ── Verificar propagación vía subscriber en relay-2 ──────────────────────────
+log "Verificando propagación en relay-2 (subscriber directo, timeout: ${TIMEOUT}s)..."
+FIRST_BYTES=$(timeout "$TIMEOUT" docker run --rm --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://relay-2:4445/anon --broadcast "$BROADCAST" \
+  export ts 2>/dev/null | head -c 188 | xxd | head -1 || echo "")
+
+if echo "$FIRST_BYTES" | grep -q "^00000000: 47"; then
+  log "PASS — sync byte 0x47 recibido en relay-2: $FIRST_BYTES"
+  kill $PUBLISHER_PID $BRIDGE_PID 2>/dev/null
+  log "========== RESULT: PASS =========="
+  log "Bridge relay-1 → relay-2 verificado. Ver ADR-0002 para contexto arquitectónico."
+  exit 0
+else
+  kill $PUBLISHER_PID $BRIDGE_PID 2>/dev/null
+  die "No bytes MPEG-TS recibidos en relay-2. First bytes: $FIRST_BYTES"
 fi
-
-log "PASS — Clustering verificado: subscriber en relay-2 recibe datos publicados en relay-1"

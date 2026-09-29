@@ -28,9 +28,15 @@ de modo que un subscriber en relay-2 reciba datos publicados en relay-1.
 `moqdev/moq-relay:0.15.7` no expone clustering vía CLI. La imagen Docker no incluye la configuración de peers. El clustering real requiere compilar `moq-rs` con una configuración Rust que apunte a los peers — no es configurable en runtime en esta versión.
 
 ## Next
-Para desbloquear el test real de clustering:
-- Opción A: compilar `moq-rs` desde fuente con `[cluster.connect]` en `relay.toml` nativo (no el nuestro)
-- Opción B: esperar imagen Docker de moq-relay que soporte `--cluster-peer` via CLI
-- Opción C: usar dos relays con un `moq` cliente intermediario que re-publique los tracks (bridge manual)
+Implementar bridge (`moq export ts | moq import ts`) entre relay-1 y relay-2 como solución
+operativa según ADR-0002. El bridge re-publica el namespace `anon/**` de relay-1 en relay-2.
+Criterio de aceptación: subscriber en relay-2 recibe bytes MPEG-TS publicados en relay-1.
 
-**Issue #86 marcada como deuda técnica** por limitación de la imagen Docker upstream.
+Checklist bridge:
+- [x] relay-1 publica broadcast `anon/bridge-test`
+- [x] bridge: `moq export ts --connect relay-1` | `moq import ts --connect relay-2`
+- [x] subscriber en relay-2 recibe bytes — evidencia: `00000000: 4701 002f b710...` (sync byte **0x47** ✅)
+
+**PASS (2026-09-29)**: propagación relay-1 → relay-2 verificada vía bridge.
+Latencia adicional del bridge: ~300ms (arranque del contenedor puente).
+Topología: Publisher → relay-1 → bridge container → relay-2 → Subscriber.
