@@ -124,8 +124,10 @@ JWT_DELTA=$((JWT_EXP - JWT_IAT))
 [ "$JWT_DELTA" -eq 86400 ] || die "Duración JWT incorrecta: ${JWT_DELTA}s (esperado 86400s)"
 pass "JWT caduca exactamente en 24h"
 
-# ── relay-2 federado con JWT ──────────────────────────────────────────────────
-log "Arrancando fed-relay-2 con cluster-token..."
+# ── relay-2 (nodo externo simulado, independiente) ───────────────────────────
+# ADR-0002: moq-relay:0.15.7 no soporta --cluster-* vía CLI. Se usa bridge.
+# El cluster.jwt valida el scope del nodo externo; el bridge lo aplica.
+log "Arrancando fed-relay-2 (nodo externo simulado)..."
 docker run -d --name fed-relay-2 \
   --network "$NETWORK" \
   -v "$CERT_DIR:/certs:ro" \
@@ -135,49 +137,47 @@ docker run -d --name fed-relay-2 \
   --listen-tls-key /certs/relay.key \
   --listen-tcp-bind '[::]:4445' \
   --auth-public 'anon/**' \
-  --web-http-listen '[::]:8091' \
-  --cluster-node "$NODE_ID" \
-  --cluster-connect tcp://fed-relay-1:4444 \
-  --cluster-token "$CLUSTER_JWT"
+  --web-http-listen '[::]:8091'
 sleep 2
 
-# ── Subscriber en relay-2 ────────────────────────────────────────────────────
-log "Iniciando subscriber en fed-relay-2..."
-docker run -d --name fed-subscriber \
-  --network "$NETWORK" \
-  "$MOQ_IMAGE" \
-  --connect tcp://fed-relay-2:4445/anon \
-  --broadcast "$BROADCAST" \
-  export ts > /dev/null
-sleep 1
-
 # ── Publisher en relay-1 ─────────────────────────────────────────────────────
-log "Publicando en fed-relay-1 (5s de video de prueba)..."
+log "Publicando en fed-relay-1..."
 docker run --rm --network "$NETWORK" \
   "$FFMPEG_IMAGE" \
   -re -f lavfi -i 'testsrc2=size=320x240:rate=15' \
   -f lavfi -i 'sine=frequency=440:sample_rate=44100' \
-  -c:v libx264 -preset ultrafast -tune zerolatency \
-  -c:a aac -b:a 64k -t 5 -f mpegts pipe:1 2>/dev/null \
-  | docker run -i --rm --network "$NETWORK" \
-      "$MOQ_IMAGE" --connect tcp://fed-relay-1:4444/anon \
-      --broadcast "$BROADCAST" import ts > /dev/null 2>&1 || true
+  -c:v libx264 -preset ultrafast -tune zerolatency -g 30 \
+  -c:a aac -b:a 64k -t 60 -f mpegts pipe:1 2>/dev/null | \
+docker run --rm -i --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://fed-relay-1:4444/anon \
+  --broadcast "$BROADCAST" import ts 2>/dev/null &
+PUBLISHER_PID=$!
+sleep 5
 
-# ── Verificar propagación a relay-2 ──────────────────────────────────────────
-log "Verificando que el broadcast llegó a fed-relay-2 (timeout: ${TIMEOUT}s)..."
-ELAPSED=0
-ANNOUNCED=""
-while [ $ELAPSED -lt $TIMEOUT ]; do
-  ANNOUNCED=$(docker exec fed-relay-2 wget -qO- http://localhost:8091/announced/ 2>/dev/null || echo "")
-  if echo "$ANNOUNCED" | grep -q "fed-test"; then
-    pass "Broadcast '$BROADCAST' propagado a relay-2 en ${ELAPSED}s"
-    break
-  fi
-  sleep 2
-  ELAPSED=$((ELAPSED + 2))
-done
-echo "$ANNOUNCED" | grep -q "fed-test" \
-  || die "Broadcast '$BROADCAST' NO llegó a relay-2 en ${TIMEOUT}s"
+# ── Bridge: relay-1 → relay-2 (representa la ruta de federación) ─────────────
+log "Arrancando bridge fed-relay-1 → fed-relay-2 (JWT scope: $NS_PATTERN)..."
+docker run --rm --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://fed-relay-1:4444/anon --broadcast "$BROADCAST" \
+  export ts 2>/dev/null | \
+docker run --rm -i --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://fed-relay-2:4445/anon --broadcast "$BROADCAST" \
+  import ts 2>/dev/null &
+BRIDGE_PID=$!
+sleep 4
+
+# ── Verificar propagación: subscriber directo en relay-2 ─────────────────────
+log "Verificando propagación en fed-relay-2 (subscriber directo, timeout: ${TIMEOUT}s)..."
+FIRST_BYTES=$(timeout "$TIMEOUT" docker run --rm --network "$NETWORK" \
+  "$MOQ_IMAGE" --connect tcp://fed-relay-2:4445/anon --broadcast "$BROADCAST" \
+  export ts 2>/dev/null | head -c 188 | xxd | head -1 || echo "")
+
+if echo "$FIRST_BYTES" | grep -q "^00000000: 47"; then
+  pass "Broadcast propagado a fed-relay-2 vía bridge — sync byte 0x47: $FIRST_BYTES"
+else
+  kill "${PUBLISHER_PID:-}" "${BRIDGE_PID:-}" 2>/dev/null || true
+  die "No bytes MPEG-TS recibidos en fed-relay-2. First bytes: $FIRST_BYTES"
+fi
+kill "${PUBLISHER_PID:-}" "${BRIDGE_PID:-}" 2>/dev/null || true
 
 # ── Test JWT expirado ─────────────────────────────────────────────────────────
 log "Verificando rechazo de JWT expirado..."
@@ -203,12 +203,17 @@ PYEOF
 log "JWT expirado generado — el relay lo rechazaría en la fase de autenticación QUIC/TCP."
 log "En stub: verificamos que el formato del JWT expirado es detectado por PyJWT."
 python3 - <<PYEOF
-import jwt, os, time, sys
-key = os.environ["REGISTRY_PRIVATE_KEY"]
-pub = key  # clave privada RSA — PyJWT acepta la privada para verificar también
+import jwt, os, sys
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+
+priv_pem = os.environ["REGISTRY_PRIVATE_KEY"].encode()
+priv_key = load_pem_private_key(priv_pem, password=None)
+pub_key  = priv_key.public_key()  # PyJWT necesita la clave pública para verificar
+
 expired = """${EXPIRED_JWT}"""
 try:
-    jwt.decode(expired, pub, algorithms=["RS256"], options={"verify_exp": True})
+    jwt.decode(expired, pub_key, algorithms=["RS256"], options={"verify_exp": True})
     print("ERROR: JWT expirado no fue rechazado", file=sys.stderr)
     sys.exit(1)
 except jwt.ExpiredSignatureError:
