@@ -21,3 +21,22 @@ groups:
         annotations:
           summary: "Lip-Sync Drift Exceeded"
           description: "Audio-Video offset is {{ $value }}ms (threshold: 45ms) for broadcast {{ $labels.broadcast }}"
+      - alert: BufferBelowThreshold
+        expr: teremoqwow_buffer_ms < 500
+        for: 1m
+        labels:
+          severity: warning
+          component: player
+        annotations:
+          summary: "Player Buffer Below Threshold"
+          description: "Buffer is {{ $value }}ms (minimum: 500ms) for broadcast {{ $labels.broadcast }}"
+
+      - alert: VideoContinuityError
+        expr: increase(teremoqwow_video_continuity_errors_total[1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: relay
+        annotations:
+          summary: "Video Continuity Error Detected"
+          description: "{{ $value }} continuity error(s) in the last minute for broadcast {{ $labels.broadcast }}"
