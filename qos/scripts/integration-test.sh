@@ -69,12 +69,34 @@ log "Pipeline activa: OK"
 # 1. Inyectar video real: FFmpeg testsrc2 → stdout → moq import ts
 ##############################################################################
 
+# ── Publicador de track sync (un único docker run con stdin pipe) ───────────
+# Un solo docker run recibe múltiples objetos (líneas JSON) de un loop bash.
+# Evita el overhead de 2s por invocación de docker run.
+log "Arrancando publicador de track sync (pipe continuo)..."
+(
+  SEQ=0
+  while true; do
+    printf '{"seq":%d,"ts_ms":%d}\n' "$SEQ" "$(date +%s%3N)"
+    SEQ=$((SEQ + 1))
+    sleep 1
+  done
+) | docker run --rm -i \
+    --network "$DOCKER_NET" \
+    moqdev/moq:latest \
+    --connect "tcp://${RELAY_HOST}:4444/anon" \
+    --broadcast "${BROADCAST}" \
+    publish sync 2>/dev/null &
+SYNC_PID=$!
+
+# Esperar 4s para que el sync publisher acumule ≥3 objetos antes de CHECK 1
+log "Sync publisher arrancado. Esperando 4s..."
+sleep 4
+
+# ── Inyectar video real: FFmpeg → stdout → moq import ts ─────────────────────
 log "Arrancando inyector de video real (FFmpeg testsrc2 → pipe → moq import ts)..."
-docker rm -f integ-ffmpeg integ-moq-sync 2>/dev/null || true
 ENCODER_START_MS=$(date +%s%3N)
 export ENCODER_START_MS
 
-# Pipe: ffmpeg genera MPEG-TS en stdout; moq import ts lo lee por stdin.
 docker run -d --rm \
   --name integ-ffmpeg \
   --network "$DOCKER_NET" \
@@ -92,40 +114,18 @@ docker run --rm -i \
   moqdev/moq:latest \
   --connect "tcp://${RELAY_HOST}:4444/anon" \
   --broadcast "${BROADCAST}" \
-  import ts &
+  import ts 2>/dev/null &
 INJECTOR_PID=$!
 
-log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 4s para estabilizar..."
-sleep 4
-
-##############################################################################
-# 1b. Publicar track de sincronía (pulsos cada 1s)
-##############################################################################
-
-log "Arrancando publicador de track sync..."
-(
-  SEQ=0
-  while true; do
-    TS=$(date +%s%3N)
-    echo "{\"seq\":${SEQ},\"ts_ms\":${TS}}" | \
-      docker run --rm -i --network "$DOCKER_NET" moqdev/moq:latest \
-        --connect "tcp://${RELAY_HOST}:4444/anon" \
-        --broadcast "${BROADCAST}" \
-        publish sync 2>/dev/null || true
-    SEQ=$((SEQ + 1))
-    sleep 1
-  done
-) &
-SYNC_PID=$!
-cleanup_orig=$(declare -f cleanup)
 cleanup() {
   log "Cleanup..."
-  kill "$SYNC_PID" 2>/dev/null || true
-  kill "$INJECTOR_PID" 2>/dev/null || true
-  docker rm -f integ-ffmpeg integ-moq-sync 2>/dev/null || true
+  kill "$SYNC_PID" "$INJECTOR_PID" 2>/dev/null || true
+  docker rm -f integ-ffmpeg 2>/dev/null || true
   [[ "${NETEM_APPLIED:-0}" == "1" ]] && sudo tc qdisc del dev lo root 2>/dev/null || true
 }
-sleep 1
+
+log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s para estabilizar..."
+sleep 3
 
 ##############################################################################
 # 2. Aplicar degradación de red (opcional)
@@ -187,8 +187,9 @@ fi
 ##############################################################################
 
 log "--- CHECK 4/4: Latencia glass-to-glass (${WINDOW_SEC}s) ---"
+# SKIP_INJECT=1: el stream ya fluye desde el inyector arrancado en el paso 1
 if MEASURE_BROADCAST="$BROADCAST" ENCODER_START_MS="$ENCODER_START_MS" \
-   DURATION="$WINDOW_SEC" \
+   DURATION="$WINDOW_SEC" SKIP_INJECT=1 \
    bash "${SCRIPT_DIR}/measure-e2e.sh" 2>/dev/null; then
   pass "Latencia glass-to-glass P95 ≤ 700ms"
 else

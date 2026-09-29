@@ -24,6 +24,7 @@ set -u  # Error on unset variables
 # ============================================================================
 
 DURATION="${DURATION:-300}"              # seconds (5 min default)
+SKIP_INJECT="${SKIP_INJECT:-0}"          # 1 = omitir inyección (stream ya activo)
 LATENCY_OUTPUT_FILE="/tmp/latency-results.csv"
 LATENCY_RAW_FILE="/tmp/latency-raw.jsonl"
 ENCODER_LOG="/tmp/encoder-log.txt"
@@ -379,33 +380,42 @@ EOF
     exit 1
   fi
 
-  # Inyectar video real via FFmpeg testsrc → SRT → moq-import
-  log_info "Arrancando inyector FFmpeg (testsrc → SRT → moq-import)..."
-  docker rm -f measure-ffmpeg 2>/dev/null || true
-  ENCODER_START_MS=$(date +%s%3N)
-  export ENCODER_START_MS
-  docker run -d --rm \
-    --name measure-ffmpeg \
-    --network teremoqwow-e2e \
-    linuxserver/ffmpeg:latest \
-    -re \
-    -f lavfi -i "testsrc2=size=1280x720:rate=30" \
-    -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
-    -c:v libx264 -preset ultrafast -tune zerolatency \
-    -c:a aac -b:a 128k \
-    -f mpegts "srt://moq-import:8890?mode=call&latency=200" \
-    > "$ENCODER_LOG" 2>&1 || {
-    log_error "No se pudo arrancar el inyector FFmpeg"
-    exit 1
-  }
-  log_info "Inyector FFmpeg arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s..."
-  sleep 3
+  local injector_pid=""
+  if [[ "$SKIP_INJECT" == "0" ]]; then
+    # Inyectar video real: FFmpeg → stdout pipe → moq import ts
+    log_info "Arrancando inyector FFmpeg (testsrc2 → pipe → moq import ts)..."
+    docker rm -f measure-ffmpeg 2>/dev/null || true
+    ENCODER_START_MS=$(date +%s%3N)
+    export ENCODER_START_MS
+    docker run -d --rm \
+      --name measure-ffmpeg \
+      --network teremoqwow-e2e \
+      linuxserver/ffmpeg:latest \
+      -re \
+      -f lavfi -i "testsrc2=size=1280x720:rate=30" \
+      -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
+      -c:v libx264 -preset ultrafast -tune zerolatency \
+      -c:a aac -b:a 128k \
+      -f mpegts pipe:1 2>/dev/null | \
+    docker run --rm -i \
+      --network teremoqwow-e2e \
+      moqdev/moq:latest \
+      --connect "tcp://moq-relay:4444/anon" \
+      --broadcast "${MEASURE_BROADCAST:-anon/live1}" \
+      import ts 2>/dev/null &
+    injector_pid=$!
+    log_info "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s..."
+    sleep 3
+  else
+    log_info "SKIP_INJECT=1 — usando stream ya activo (T0=${ENCODER_START_MS:-0}ms)"
+  fi
 
   # Capturar latencia real con ffprobe en el extremo de salida
   capture_metrics "$DURATION" "$LATENCY_OUTPUT_FILE"
   local capture_result=$?
 
-  # Detener inyector
+  # Detener inyector propio (si fue arrancado aquí)
+  [[ -n "$injector_pid" ]] && kill "$injector_pid" 2>/dev/null || true
   docker rm -f measure-ffmpeg 2>/dev/null || true
 
   [[ $capture_result -ne 0 ]] && { log_error "Captura fallida"; exit 1; }
