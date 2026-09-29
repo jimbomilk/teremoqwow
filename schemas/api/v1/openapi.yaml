@@ -29,7 +29,58 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+  /interactions:
+    post:
+      summary: Registrar interacción del espectador (voto, reacción, pregunta)
+      operationId: createInteraction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: https://teremoqwow.dev/schemas/api/v1/interaction-create.json
+      responses:
+        "202":
+          description: Interacción aceptada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interaction_id: { type: string, format: uuid }
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest:
+      description: Payload inválido
+      content:
+        application/json:
+          schema:
+            $ref: https://teremoqwow.dev/schemas/common/v1/error.json
+    Unauthorized:
+      description: JWT ausente o inválido
+      content:
+        application/json:
+          schema:
+            $ref: https://teremoqwow.dev/schemas/common/v1/error.json
+    TooManyRequests:
+      description: Rate limit superado
+      content:
+        application/json:
+          schema:
+            $ref: https://teremoqwow.dev/schemas/common/v1/error.json
   schemas:
     Error:
       $ref: https://teremoqwow.dev/schemas/common/v1/error.json

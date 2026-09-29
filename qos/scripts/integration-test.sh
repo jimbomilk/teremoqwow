@@ -63,23 +63,25 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${RELAY_HOST}$"; then
   echo "[INTEGRATION] ERROR: contenedor '${RELAY_HOST}' no está corriendo." >&2
   exit 1
 fi
-if ! docker ps --format '{{.Names}}' | grep -q '^moq-import$'; then
-  echo "[INTEGRATION] ERROR: contenedor 'moq-import' no está corriendo." >&2
-  exit 1
-fi
-
 log "Pipeline activa: OK"
 
 ##############################################################################
-# 1. Inyectar video real con FFmpeg testsrc2 → SRT → moq-import
+# 1. Inyectar video real: FFmpeg testsrc2 → stdout → moq import ts
 ##############################################################################
 
-log "Arrancando inyector de video real (FFmpeg testsrc2)..."
-docker rm -f integ-ffmpeg 2>/dev/null || true
+# ── Track de sincronía: moq-clock-ietf no disponible en este entorno. ────────
+# El relay incluye clock en el catalog; verify-sync-track.sh lo verifica.
+SYNC_PID=""
+log "Sync publisher: skipped (moq-clock-ietf no disponible; clock verificado en catalog)"
+
+# ── Inyectar video real: FFmpeg → stdout → moq import ts ─────────────────────
+log "Arrancando inyector de video real (FFmpeg testsrc2 → pipe → moq import ts)..."
 ENCODER_START_MS=$(date +%s%3N)
 export ENCODER_START_MS
 
-docker run -d --rm \
+# Sin -d: el stdout del contenedor FFmpeg debe fluir al pipe directamente.
+# Con -d la salida va al daemon Docker y el pipe queda vacío.
+docker run --rm \
   --name integ-ffmpeg \
   --network "$DOCKER_NET" \
   linuxserver/ffmpeg:latest \
@@ -90,11 +92,24 @@ docker run -d --rm \
   -profile:v main -level 4.0 \
   -g 60 -keyint_min 60 \
   -c:a aac -b:a 128k \
-  -f mpegts "srt://moq-import:8890?mode=call&latency=200" \
-  >/dev/null 2>&1 || { echo "[INTEGRATION] ERROR: no se pudo arrancar FFmpeg" >&2; exit 1; }
+  -f mpegts pipe:1 2>/dev/null | \
+docker run --rm -i \
+  --network "$DOCKER_NET" \
+  moqdev/moq:0.12.7 \
+  --connect "tcp://${RELAY_HOST}:4444/anon" \
+  --broadcast "${BROADCAST}" \
+  import ts 2>/dev/null &
+INJECTOR_PID=$!
 
-log "FFmpeg arrancado (T0=${ENCODER_START_MS}ms). Esperando 3s para estabilizar..."
-sleep 3
+cleanup() {
+  log "Cleanup..."
+  [[ -n "${INJECTOR_PID:-}" ]] && kill "$INJECTOR_PID" 2>/dev/null || true
+  docker rm -f integ-ffmpeg 2>/dev/null || true
+  [[ "${NETEM_APPLIED:-0}" == "1" ]] && sudo tc qdisc del dev lo root 2>/dev/null || true
+}
+
+log "Inyector arrancado (T0=${ENCODER_START_MS}ms). Esperando 8s para estabilizar..."
+sleep 8
 
 ##############################################################################
 # 2. Aplicar degradación de red (opcional)
@@ -156,8 +171,9 @@ fi
 ##############################################################################
 
 log "--- CHECK 4/4: Latencia glass-to-glass (${WINDOW_SEC}s) ---"
+# SKIP_INJECT=1: el stream ya fluye desde el inyector arrancado en el paso 1
 if MEASURE_BROADCAST="$BROADCAST" ENCODER_START_MS="$ENCODER_START_MS" \
-   DURATION="$WINDOW_SEC" \
+   DURATION="$WINDOW_SEC" SKIP_INJECT=1 \
    bash "${SCRIPT_DIR}/measure-e2e.sh" 2>/dev/null; then
   pass "Latencia glass-to-glass P95 ≤ 700ms"
 else
