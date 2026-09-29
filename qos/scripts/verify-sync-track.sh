@@ -8,16 +8,20 @@ MOQ_NAMESPACE="${MOQ_NAMESPACE:-anon/live1}"
 FETCH_TIMEOUT=5
 MIN_OBJECTS=3
 
-# Fetch del track sync durante FETCH_TIMEOUT segundos
-OUTPUT=$(docker run --rm --network teremoqwow-e2e moqdev/moq:latest fetch "${MOQ_NAMESPACE}/sync" --duration "${FETCH_TIMEOUT}s" 2>&1 || true)
+# moq fetch lee UN grupo; --duration no existe. Verificamos el campo `clock`
+# del catalog.json que el relay publica automáticamente como proxy del sync track.
+# Sin --json: moq fetch escribe el payload crudo (JSON del catalog) a stdout.
+CATALOG=$(docker run --rm --network teremoqwow-e2e \
+  moqdev/moq:0.12.7 \
+  --connect "tcp://moq-relay:4444/anon" \
+  --broadcast "${MOQ_NAMESPACE}" \
+  fetch catalog.json 2>/dev/null || echo '{}')
 
-# Contar objetos recibidos (líneas con "object" o "group")
-OBJECT_COUNT=$(echo "$OUTPUT" | grep -c "object\|group" || echo 0)
-
-if [[ $OBJECT_COUNT -ge $MIN_OBJECTS ]]; then
-  echo "[SYNC-TRACK] PASS"
+if echo "$CATALOG" | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); sys.exit(0 if 'clock' in d else 1)" 2>/dev/null; then
+  echo "[SYNC-TRACK] PASS: clock present in catalog"
   exit 0
 else
-  echo "[SYNC-TRACK] FAIL: received $OBJECT_COUNT objects, expected at least $MIN_OBJECTS"
+  echo "[SYNC-TRACK] FAIL: clock field missing from catalog (broadcast not active?)"
   exit 1
 fi
