@@ -1,0 +1,219 @@
+# teremoqwow — stack completo de desarrollo
+# Uso: docker compose up -d
+# Prerrequisito: cp .env.example .env && bash scripts/renew-dev-certs.sh
+
+networks:
+  teremoqwow-dev:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+  clickhouse-data:
+
+services:
+
+  # ── MoQ Relay ──────────────────────────────────────────────────────────────
+  moq-relay:
+    image: moqdev/moq-relay:0.15.7
+    networks: [teremoqwow-dev]
+    ports:
+      - "4443:4443/udp"
+      - "4443:4443/tcp"
+      - "4444:4444"
+      - "8090:8090"
+    volumes:
+      - ./config/relay/certs:/certs:ro
+    command: >
+      --listen [::]:4443
+      --listen-tls-cert /certs/relay.pem
+      --listen-tls-key /certs/relay.key
+      --listen-tcp-bind [::]:4444
+      --auth-public "anon/**"
+      --web-http-listen [::]:8090
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── KrakenD API Gateway ────────────────────────────────────────────────────
+  krakend:
+    image: devopsfaith/krakend:latest
+    networks: [teremoqwow-dev]
+    ports:
+      - "8080:8080"
+      - "8090:9090"   # métricas Prometheus
+    volumes:
+      - ./config/krakend/krakend.json:/etc/krakend/krakend.json:ro
+    environment:
+      KRAKEND_CONFIG: /etc/krakend/krakend.json
+    depends_on:
+      billing-webhook:
+        condition: service_healthy
+      registry-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── Billing Webhook (Flask) ────────────────────────────────────────────────
+  billing-webhook:
+    build:
+      context: ./comercial/billing
+      dockerfile: Dockerfile
+    networks: [teremoqwow-dev]
+    ports:
+      - "9000:9000"
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-whsec_dev_secret_replace_in_prod}
+      JWT_RS256_PRIVATE_KEY_PATH: /keys/private.pem
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-teremoqwow}
+    volumes:
+      - ./config/relay/certs:/keys:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── Registry Server ────────────────────────────────────────────────────────
+  registry-server:
+    build:
+      context: ./relay
+      dockerfile: Dockerfile
+    networks: [teremoqwow-dev]
+    ports:
+      - "9001:8081"
+    environment:
+      REGISTRY_PORT: "8081"
+      REGISTRY_PRIVATE_KEY_PATH: /keys/private.pem
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+    volumes:
+      - ./config/relay/certs:/keys:ro
+      - ./schemas:/app/schemas:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── Player (Vite dev server) ───────────────────────────────────────────────
+  player:
+    build:
+      context: ./player
+      dockerfile: Dockerfile
+      target: dev
+    networks: [teremoqwow-dev]
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_MOQ_RELAY_URL: ${VITE_MOQ_RELAY_URL:-ws://localhost:4443/anon}
+      VITE_RELAY_BROADCAST: ${VITE_RELAY_BROADCAST:-anon/live1}
+    volumes:
+      - ./player/src:/app/src:ro
+      - ./overlays:/app/public/overlays:ro
+    depends_on:
+      moq-relay:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    networks: [teremoqwow-dev]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── ClickHouse ─────────────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    networks: [teremoqwow-dev]
+    ports:
+      - "8123:8123"   # HTTP API
+      - "9009:9009"   # native protocol
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./config/clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-teremoqwow}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    networks: [teremoqwow-dev]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    depends_on:
+      moq-relay:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    networks: [teremoqwow-dev]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-dev-grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
