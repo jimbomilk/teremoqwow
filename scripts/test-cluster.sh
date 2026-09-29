@@ -50,6 +50,8 @@ docker run -d --name relay-1 \
 
 # ── relay-2 (federado, conectado a relay-1 via TCP qmux) ─────────────────────
 log "Arrancando relay-2 (cluster-connect → relay-1:4444)..."
+# relay-2 se conecta a relay-1 como cliente qmux (no existe --cluster-* en 0.15.7).
+# El relay upstream actúa como broker: relay-2 subscribe los broadcasts de relay-1.
 docker run -d --name relay-2 \
   --network "$NETWORK" \
   -v "$CERT_DIR:/certs:ro" \
@@ -60,19 +62,29 @@ docker run -d --name relay-2 \
   --listen-tcp-bind '[::]:4445' \
   --auth-public 'anon/**' \
   --web-http-listen '[::]:8091' \
-  --cluster-node relay-2 \
-  --cluster-connect tcp://relay-1:4444
+  --connect tcp://relay-1:4444
 
 sleep 2
 
 # ── Verificar que los relays están activos ────────────────────────────────────
-log "Verificando health de relay-1..."
-docker exec relay-1 wget -qO- http://localhost:8090/announced/ >/dev/null \
-  || die "relay-1 no responde en /announced/"
+# Verificar via logs: relay arrancado cuando muestra "listening" en web y tcp.
+log "Verificando health de relay-1 (logs, poll 10s)..."
+for i in $(seq 1 10); do
+  docker logs relay-1 2>&1 | grep -q 'listening.*8090\|web.*8090' && break
+  sleep 1
+done
+docker logs relay-1 2>&1 | grep -q 'listening.*8090\|web.*8090' \
+  || die "relay-1 no arrancó (no aparece 'listening' en logs)"
+log "relay-1 activo: $(docker logs relay-1 2>&1 | grep -E 'listening|connected' | tr '\n' '|')"
 
-log "Verificando health de relay-2..."
-docker exec relay-2 wget -qO- http://localhost:8091/announced/ >/dev/null \
-  || die "relay-2 no responde en /announced/"
+log "Verificando health de relay-2 (logs, poll 10s)..."
+for i in $(seq 1 10); do
+  docker logs relay-2 2>&1 | grep -q 'listening.*8091\|web.*8091' && break
+  sleep 1
+done
+docker logs relay-2 2>&1 | grep -q 'listening.*8091\|web.*8091' \
+  || die "relay-2 no arrancó (no aparece 'listening' en logs)"
+log "relay-2 activo: $(docker logs relay-2 2>&1 | grep -E 'listening|connect' | tr '\n' '|')"
 
 # ── Subscriber en relay-2 (escucha antes de publicar) ────────────────────────
 log "Iniciando subscriber en relay-2..."
