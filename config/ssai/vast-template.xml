@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VAST 3.0 stub para SSAI — #84
+  Conforme con IAB Tech Lab VAST 3.0 (https://www.iab.com/guidelines/vast/).
+
+  Este template es completado en tiempo de ejecución por el servidor SSAI.
+  Los marcadores {{...}} se sustituyen antes de entregar al player.
+
+  Variables de sustitución:
+    AD_ID         — identificador único del anuncio (UUID)
+    AD_TITLE      — título del anuncio (no visible al usuario)
+    CREATIVE_ID   — ID del creative en el Ad Server
+    MEDIA_URL     — URL HTTPS del fichero de vídeo del anuncio (MP4 H.264)
+    CLICK_URL     — URL de destino al hacer clic en el anuncio
+    TRACKING_URL  — URL base de beacons de seguimiento (sin parámetros)
+    DURATION      — duración en formato HH:MM:SS (e.g. 00:00:30)
+    WIDTH         — ancho en píxeles del vídeo del anuncio
+    HEIGHT        — alto en píxeles del vídeo del anuncio
+    BITRATE       — bitrate del vídeo en Kbps
+-->
+<VAST version="3.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="vast.xsd">
+
+  <Ad id="{{AD_ID}}" sequence="1">
+    <InLine>
+      <AdSystem version="1.0">teremoqwow-ssai</AdSystem>
+      <AdTitle>{{AD_TITLE}}</AdTitle>
+
+      <!-- Beacon de impresión — disparar cuando el anuncio empieza a reproducirse -->
+      <Impression id="imp-1"><![CDATA[{{TRACKING_URL}}?event=impression&ad={{AD_ID}}]]></Impression>
+
+      <Creatives>
+        <Creative id="{{CREATIVE_ID}}" sequence="1">
+          <Linear>
+            <Duration>{{DURATION}}</Duration>
+
+            <TrackingEvents>
+              <Tracking event="start"><![CDATA[{{TRACKING_URL}}?event=start&ad={{AD_ID}}]]></Tracking>
+              <Tracking event="firstQuartile"><![CDATA[{{TRACKING_URL}}?event=firstQuartile&ad={{AD_ID}}]]></Tracking>
+              <Tracking event="midpoint"><![CDATA[{{TRACKING_URL}}?event=midpoint&ad={{AD_ID}}]]></Tracking>
+              <Tracking event="thirdQuartile"><![CDATA[{{TRACKING_URL}}?event=thirdQuartile&ad={{AD_ID}}]]></Tracking>
+              <Tracking event="complete"><![CDATA[{{TRACKING_URL}}?event=complete&ad={{AD_ID}}]]></Tracking>
+              <Tracking event="skip"><![CDATA[{{TRACKING_URL}}?event=skip&ad={{AD_ID}}]]></Tracking>
+            </TrackingEvents>
+
+            <VideoClicks>
+              <ClickThrough id="click-1"><![CDATA[{{CLICK_URL}}]]></ClickThrough>
+              <ClickTracking id="ctrack-1"><![CDATA[{{TRACKING_URL}}?event=click&ad={{AD_ID}}]]></ClickTracking>
+            </VideoClicks>
+
+            <MediaFiles>
+              <!-- MP4 H.264 — requerido por IAB para máxima compatibilidad de player -->
+              <MediaFile id="mf-1"
+                         delivery="progressive"
+                         type="video/mp4"
+                         width="{{WIDTH}}"
+                         height="{{HEIGHT}}"
+                         bitrate="{{BITRATE}}"
+                         minBitrate="400"
+                         maxBitrate="2000"
+                         scalable="true"
+                         maintainAspectRatio="true">
+                <![CDATA[{{MEDIA_URL}}]]>
+              </MediaFile>
+            </MediaFiles>
+          </Linear>
+        </Creative>
+      </Creatives>
+
+      <!-- Extensions específicas de teremoqwow (reservado para metadatos SSAI) -->
+      <Extensions>
+        <Extension type="teremoqwow-ssai">
+          <!-- Espacio para metadatos adicionales (e.g. segmento HLS/DASH de inserción) -->
+        </Extension>
+      </Extensions>
+
+    </InLine>
+  </Ad>
+
+</VAST>

@@ -82,6 +82,50 @@
       ]
     },
     {
+      "endpoint": "/stripe/webhook",
+      "method": "POST",
+      "output_encoding": "json",
+      "input_headers": ["Stripe-Signature", "Content-Type"],
+      "extra_config": {
+        "qos/ratelimit/router": { "max_rate": 50, "client_max_rate": 10, "strategy": "ip" }
+      },
+      "backend": [
+        {
+          "url_pattern": "/v1/stripe/webhook",
+          "method": "POST",
+          "host": ["http://billing:8084"],
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "endpoint": "/drm/license",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_headers": ["Authorization", "Content-Type"],
+      "extra_config": {
+        "validation/json-schema": {
+          "$ref": "file:///etc/krakend/schemas/license-request.json"
+        },
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://auth:8082/.well-known/jwks.json",
+          "disable_jwk_security": false,
+          "roles_key": "scopes",
+          "roles": ["drm:license"]
+        },
+        "qos/ratelimit/router": { "max_rate": 200, "client_max_rate": 20, "strategy": "ip" }
+      },
+      "backend": [
+        {
+          "url_pattern": "/v1/drm/license",
+          "method": "POST",
+          "host": ["http://drm:8085"],
+          "encoding": "no-op"
+        }
+      ]
+    },
+    {
       "endpoint": "/interactions",
       "method": "POST",
       "output_encoding": "json",

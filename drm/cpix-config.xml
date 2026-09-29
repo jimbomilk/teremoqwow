@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CPIX 2.3 — Configuración de cifrado multi-DRM para teremoqwow (#80 EZDRM CPIX)
+
+  Esquemas de cifrado CENC:
+    cbcs  → FairPlay Streaming (Apple)
+    cenc  → Widevine (Google) + PlayReady (Microsoft)
+
+  Los marcadores {{...}} son sustituidos en tiempo de ejecución por drm/ezdrm_client.py
+  al solicitar claves a la API EZDRM. NUNCA hardcodear valores de clave aquí.
+
+  Variables:
+    CONTENT_ID          — identificador único del contenido (UUID o slug)
+    KID_CBCS            — Key ID para FairPlay (UUID en formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    KID_CENC            — Key ID para Widevine/PlayReady (mismo formato)
+    IV_CBCS             — Vector de inicialización para cbcs (base64, 16 bytes)
+    IV_CENC             — Vector de inicialización para cenc (base64, 16 bytes)
+    ENCRYPTED_KEY_CBCS  — Clave de contenido cifrada con clave pública EZDRM (base64)
+    ENCRYPTED_KEY_CENC  — Ídem para cenc
+    PERIOD_ID           — ID del período de cifrado (e.g. "period-1")
+    FAIRPLAY_PSSH_B64   — PSSH box FairPlay en base64
+    WIDEVINE_PSSH_B64   — PSSH box Widevine en base64
+    PLAYREADY_PSSH_B64  — PSSH box PlayReady en base64
+    FAIRPLAY_CPD_B64    — ContentProtectionData FairPlay en base64
+    PLAYREADY_CPD_B64   — ContentProtectionData PlayReady en base64
+-->
+<CPIX xmlns="urn:dashif:org:cpix"
+      xmlns:pskc="urn:ietf:params:xml:ns:keyprov:pskc"
+      contentId="{{CONTENT_ID}}"
+      version="2.3">
+
+  <ContentKeyList>
+    <!-- Clave FairPlay — esquema cbcs (AES-128-CBC con pattern encryption) -->
+    <ContentKey kid="{{KID_CBCS}}"
+                commonEncryptionScheme="cbcs"
+                explicitIV="{{IV_CBCS}}">
+      <Data>
+        <pskc:Secret>
+          <!-- Cifrado con clave pública EZDRM (RSA-OAEP). Nunca texto plano en prod. -->
+          <pskc:EncryptedValue>{{ENCRYPTED_KEY_CBCS}}</pskc:EncryptedValue>
+        </pskc:Secret>
+      </Data>
+    </ContentKey>
+
+    <!-- Clave Widevine + PlayReady — esquema cenc (AES-128-CTR) -->
+    <ContentKey kid="{{KID_CENC}}"
+                commonEncryptionScheme="cenc"
+                explicitIV="{{IV_CENC}}">
+      <Data>
+        <pskc:Secret>
+          <pskc:EncryptedValue>{{ENCRYPTED_KEY_CENC}}</pskc:EncryptedValue>
+        </pskc:Secret>
+      </Data>
+    </ContentKey>
+  </ContentKeyList>
+
+  <ContentKeyUsageRuleList>
+    <ContentKeyUsageRule kid="{{KID_CBCS}}" intendedTrackType="VIDEO_AUDIO">
+      <KeyPeriodFilter periodId="{{PERIOD_ID}}"/>
+    </ContentKeyUsageRule>
+    <ContentKeyUsageRule kid="{{KID_CENC}}" intendedTrackType="VIDEO_AUDIO">
+      <KeyPeriodFilter periodId="{{PERIOD_ID}}"/>
+    </ContentKeyUsageRule>
+  </ContentKeyUsageRuleList>
+
+  <DRMSystemList>
+    <!-- FairPlay Streaming — systemId IANA registrado por Apple -->
+    <DRMSystem kid="{{KID_CBCS}}"
+               systemId="94ce86fb-07ff-4f43-adb8-93d2fa968ca2">
+      <PSSH>{{FAIRPLAY_PSSH_B64}}</PSSH>
+      <ContentProtectionData>{{FAIRPLAY_CPD_B64}}</ContentProtectionData>
+    </DRMSystem>
+
+    <!-- Widevine — systemId IANA registrado por Google -->
+    <DRMSystem kid="{{KID_CENC}}"
+               systemId="edef8ba9-79d6-4ace-a3c8-27dcd51d21ed">
+      <PSSH>{{WIDEVINE_PSSH_B64}}</PSSH>
+    </DRMSystem>
+
+    <!-- PlayReady — systemId IANA registrado por Microsoft -->
+    <DRMSystem kid="{{KID_CENC}}"
+               systemId="9a04f079-9840-4286-ab92-e65be0885f95">
+      <PSSH>{{PLAYREADY_PSSH_B64}}</PSSH>
+      <ContentProtectionData>{{PLAYREADY_CPD_B64}}</ContentProtectionData>
+    </DRMSystem>
+  </DRMSystemList>
+
+</CPIX>

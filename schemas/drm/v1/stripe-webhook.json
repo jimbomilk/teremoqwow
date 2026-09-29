@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/drm/v1/stripe-webhook.json",
+  "title": "StripeWebhookEvent",
+  "description": "Subconjunto de eventos Stripe relevantes para teremoqwow. Verificados con Stripe-Signature antes de procesar.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "type", "data"],
+  "properties": {
+    "id": { "type": "string", "description": "ID único del evento Stripe (evt_...)." },
+    "type": {
+      "type": "string",
+      "enum": [
+        "checkout.session.completed",
+        "invoice.paid",
+        "customer.subscription.deleted"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "required": ["object"],
+      "properties": {
+        "object": { "type": "object" }
+      }
+    },
+    "livemode": { "type": "boolean" }
+  }
+}

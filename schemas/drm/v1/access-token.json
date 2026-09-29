@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/drm/v1/access-token.json",
+  "title": "AccessTokenClaims",
+  "description": "Claims del JWT emitido por teremoqwow tras pago verificado. Autoriza acceso al namespace MoQ y solicitud de licencia DRM.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["sub", "namespace", "scopes", "exp", "iat"],
+  "properties": {
+    "sub": {
+      "type": "string",
+      "description": "customer_id de Stripe o user_id del sistema."
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Namespace MoQ al que el token otorga acceso (e.g. 'broadcasts/live1')."
+    },
+    "scopes": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["stream:read", "drm:license"] },
+      "minItems": 1,
+      "description": "Permisos otorgados. stream:read para suscribir; drm:license para solicitar licencia."
+    },
+    "content_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs de contenido DRM autorizados. Vacío = todos los del namespace."
+    },
+    "availability_windows": {
+      "type": "array",
+      "description": "Ventanas temporales en que el acceso es válido.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start_time", "end_time"],
+        "properties": {
+          "start_time": { "type": "string", "format": "date-time" },
+          "end_time":   { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "blocked_regions": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z]{2}$" },
+      "description": "Códigos ISO 3166-1 alpha-2 de regiones bloqueadas."
+    },
+    "stripe_subscription_id": {
+      "type": "string",
+      "description": "ID de la suscripción Stripe asociada (para revocación)."
+    },
+    "exp": { "type": "integer", "description": "Unix timestamp de expiración." },
+    "iat": { "type": "integer", "description": "Unix timestamp de emisión." }
+  }
+}
