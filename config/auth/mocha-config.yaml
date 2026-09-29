@@ -1,0 +1,60 @@
+# mocha-config.yaml — issue #90 (stub)
+# Configuración MOCHA Identity para federación teremoqwow.
+# MOCHA (MoQ Coordinated Handshake Architecture) — stub estructural.
+# Implementación real pendiente de la especificación IETF definitiva.
+
+mocha:
+  version: "0.1-draft"
+
+  # Proveedor raíz Teremoq — emite identidades de nodo para la federación
+  identity_provider:
+    id: teremoqwow-root
+    display_name: "Teremoqwow Identity Root"
+    jwks_uri: "https://auth.teremoqwow.dev/.well-known/jwks.json"
+    issuer: "https://auth.teremoqwow.dev"
+    # Algoritmo de firma para tokens de identidad de nodo federado
+    signing_algorithm: RS256
+    # Rotación de claves: cada 30 días
+    key_rotation_days: 30
+
+  # Validación de tokens entrantes de nodos federados externos
+  federation:
+    # Lista de issuers confiables para tokens federados
+    trusted_issuers:
+      - issuer: "https://auth.teremoqwow.dev"
+        jwks_uri: "https://auth.teremoqwow.dev/.well-known/jwks.json"
+        # Emisor propio — siempre confiable
+      # Añadir issuers de partners aquí:
+      # - issuer: "https://auth.partner-relay.example"
+      #   jwks_uri: "https://auth.partner-relay.example/.well-known/jwks.json"
+
+    # Scopes requeridos para que un nodo externo publique en la federación
+    required_scopes:
+      - "moq:publish"
+    # Claim que contiene el namespace permitido para el nodo
+    namespace_claim: "namespace_pattern"
+    # Duración máxima aceptada de un token federado
+    max_token_ttl_seconds: 86400
+
+  # Mapeo de permisos a namespaces MoQT (ver relay/mocha_validator.py)
+  namespace_policy:
+    # Nodos del cluster interno pueden publicar bajo contrib/ y anon/
+    internal_nodes:
+      allowed_prefixes:
+        - "anon/**"
+        - "contrib/**"
+        - "live/**"
+    # Nodos federados externos solo bajo contrib/{node_id}/
+    external_nodes:
+      allowed_prefix_template: "contrib/{node_id}/**"
+      deny_prefixes:
+        - "anon/**"
+        - "live/**"
+        - "admin/**"
+
+  # Gestión de sesión MOCHA
+  session:
+    # Tiempo de gracia para renovar el token antes de que expire
+    renewal_window_seconds: 300
+    # Máximo de intentos de renovación antes de desconectar el nodo
+    max_renewal_retries: 3
