@@ -41,6 +41,26 @@ web_http_listen = "[::]:8090"
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level = "info"
 
+# ── Clustering (Fase 6, issue #86) ───────────────────────────────────────────
+# moq-relay 0.15.x expone clustering vía flags CLI; los equivalentes en el
+# formato plano clave=valor que acepta --config son los de abajo.
+# Descomentar y ajustar en producción; inyectar CLUSTER_JWT desde env.
+#
+# cluster_node    = "relay-eu-west-1"   # identificador único del nodo
+# cluster_connect = "tcp://relay-us-east-1.teremoqwow.dev:4444"
+# cluster_token   = "${CLUSTER_JWT}"    # cluster.jwt emitido por /registry/join
+#
+# Para múltiples peers añadir una línea cluster_connect por peer.
+# El scope del JWT es siempre contrib/{node_id}/** (mínimo privilegio).
+#
+# Referencia de flags CLI equivalentes (útil para Docker / CI):
+#   --cluster-node   relay-eu-west-1
+#   --cluster-connect tcp://relay-peer:4444
+#   --cluster-token  $CLUSTER_JWT
+#
+# Test de clustering: scripts/test-cluster.sh
+# Test de federación completa: scripts/verify-federation.sh
+
 # ── DEV OVERRIDE ──────────────────────────────────────────────────────────────
 # Para sobreescribir valores sin editar este fichero, exporta variables de
 # entorno con el prefijo MOQ_RELAY_ (kebab→SCREAMING_SNAKE, guiones→guiones bajos):
