@@ -170,7 +170,7 @@ start_pipeline() {
     docker run -d --name ts-moq-relay --network "${DOCKER_NET}" \
       -p 4444:4444 -p 8090:8090 \
       -v "${CERT_DIR}:/certs:ro" \
-      moqdev/moq-relay:latest \
+      moqdev/moq-relay:0.15.7 \
       --listen '[::]:4443' \
       --listen-tls-cert /certs/relay.pem --listen-tls-key /certs/relay.key \
       --listen-tcp-bind '[::]:4444' \
@@ -189,7 +189,7 @@ start_pipeline() {
     log "Starting moq import srt listener on ${SRT_LISTEN_ADDR}..."
     docker run -d --name ts-moq-import --network "${DOCKER_NET}" \
       -p 8890:8890/udp \
-      moqdev/moq:latest \
+      moqdev/moq:0.12.7 \
       --connect "tcp://${RELAY_HOST}:4444/anon" \
       --broadcast "${MOQ_BROADCAST}" \
       import srt --listen '[::]:8890' --latency "${SRT_LATENCY}" \
@@ -218,24 +218,24 @@ start_pipeline() {
     -c:v:0 libx264 -preset:v:0 ultrafast -tune:v:0 zerolatency \
     -profile:v:0 main -level:v:0 4.0 \
     -s:v:0 1280x720 -b:v:0 2500k \
-    -g:v:0 60 -keyint_min:v:0 60 -sc_threshold:v:0 0 \
-    -force_key_frames:v:0 "expr:gte(t,n_forced*2)" \
+    -g:v:0 30 -keyint_min:v:0 30 -sc_threshold:v:0 0 \
+    -force_key_frames:v:0 "expr:gte(t,n_forced*1)" \
     -x264-params:v:0 "nal-hrd=cbr:force-cfr=1" \
     -pix_fmt:v:0 yuv420p \
     \
     -c:v:1 libx264 -preset:v:1 ultrafast -tune:v:1 zerolatency \
     -profile:v:1 main -level:v:1 3.1 \
     -s:v:1 854x480 -b:v:1 1200k \
-    -g:v:1 60 -keyint_min:v:1 60 -sc_threshold:v:1 0 \
-    -force_key_frames:v:1 "expr:gte(t,n_forced*2)" \
+    -g:v:1 30 -keyint_min:v:1 30 -sc_threshold:v:1 0 \
+    -force_key_frames:v:1 "expr:gte(t,n_forced*1)" \
     -x264-params:v:1 "nal-hrd=cbr:force-cfr=1" \
     -pix_fmt:v:1 yuv420p \
     \
     -c:v:2 libx264 -preset:v:2 ultrafast -tune:v:2 zerolatency \
     -profile:v:2 main -level:v:2 3.0 \
     -s:v:2 640x360 -b:v:2 600k \
-    -g:v:2 60 -keyint_min:v:2 60 -sc_threshold:v:2 0 \
-    -force_key_frames:v:2 "expr:gte(t,n_forced*2)" \
+    -g:v:2 30 -keyint_min:v:2 30 -sc_threshold:v:2 0 \
+    -force_key_frames:v:2 "expr:gte(t,n_forced*1)" \
     -x264-params:v:2 "nal-hrd=cbr:force-cfr=1" \
     -pix_fmt:v:2 yuv420p \
     \
@@ -262,7 +262,7 @@ export_stream() {
   # Así el kill es instantáneo incluso con red degradada por netem.
   docker rm -f ts-moq-export 2>/dev/null || true
   docker run -d --name ts-moq-export --stop-timeout 1 --network teremoqwow-e2e \
-    moqdev/moq:latest \
+    moqdev/moq:0.12.7 \
     --connect "tcp://${RELAY_HOST:-moq-relay}:4444/anon" \
     --broadcast "${MOQ_BROADCAST}" \
     export ts \
@@ -348,11 +348,14 @@ main() {
   echo
 
   # Checks previos
-  check_net_admin
   check_dependencies
-
-  # Degradación de red
-  apply_netem
+  SKIP_NETEM="${SKIP_NETEM:-0}"
+  if [[ "$SKIP_NETEM" == "1" ]]; then
+    log "SKIP_NETEM=1 — ejecutando sin degradación de red (modo pipeline check)"
+  else
+    check_net_admin
+    apply_netem
+  fi
 
   # Arrancar pipeline
   start_pipeline
