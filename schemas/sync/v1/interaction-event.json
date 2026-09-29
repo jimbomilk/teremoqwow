@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v1/interaction-event.json",
+  "title": "InteractionEvent",
+  "description": "Evento publicado en el track MoQ 'interaction' con packaging eventtimeline (servidor → player). Dirige el ciclo de vida de encuestas e interactividad sincronizadas con el PTS del vídeo.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "timestamp", "poll_id"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador único del evento."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["poll_open", "poll_close", "stats_update"],
+      "description": "Tipo de evento: apertura de encuesta, cierre o actualización de conteos."
+    },
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json",
+      "description": "Timestamp alineado con el PTS del vídeo para renderizado sincronizado."
+    },
+    "poll_id": {
+      "type": "string",
+      "description": "Identificador de la encuesta a la que pertenece el evento."
+    },
+    "question": {
+      "type": "string",
+      "description": "Texto de la pregunta. Presente en kind=poll_open."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tiempo máximo de votación en milisegundos. Presente en kind=poll_open."
+    },
+    "options": {
+      "type": "array",
+      "description": "Opciones de votación. Presente en kind=poll_open.",
+      "minItems": 2,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "description": "Mapa option_id → número de votos. Presente en kind=stats_update y kind=poll_close.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "winner_option_id": {
+      "type": "string",
+      "description": "Opción ganadora. Presente en kind=poll_close."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "poll_open" } }, "required": ["kind"] },
+      "then": { "required": ["question", "options", "duration_ms"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "poll_close" } }, "required": ["kind"] },
+      "then": { "required": ["counts", "winner_option_id"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "stats_update" } }, "required": ["kind"] },
+      "then": { "required": ["counts"] }
+    }
+  ]
+}

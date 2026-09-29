@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poll Overlay</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: transparent;
+      padding: 1rem;
+    }
+
+    .poll-container {
+      display: none;
+      background: rgba(0, 0, 0, 0.85);
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 90%;
+      margin: 0 auto;
+      color: #fff;
+      font-size: 14px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.3s ease-out;
+    }
+
+    .poll-container.visible {
+      display: block;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .poll-header {
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+      padding-bottom: 1rem;
+    }
+
+    .poll-question {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      line-height: 1.4;
+    }
+
+    .poll-timer {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.6);
+      margin-top: 0.5rem;
+    }
+
+    .poll-options {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .poll-option {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      cursor: pointer;
+      padding: 0.75rem;
+      border-radius: 8px;
+      transition: background-color 0.2s;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .poll-option:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .poll-option input[type="radio"] {
+      cursor: pointer;
+      accent-color: #4a9eff;
+    }
+
+    .poll-option-text {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .poll-option-progress {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
+      width: 100px;
+    }
+
+    .progress-bar {
+      flex: 1;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4a9eff, #00d4ff);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.6);
+      min-width: 30px;
+      text-align: right;
+    }
+
+    .poll-controls {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover {
+      opacity: 0.85;
+    }
+
+    .btn-vote {
+      background: linear-gradient(135deg, #4a9eff, #00d4ff);
+      color: #000;
+    }
+
+    .btn-vote:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status-message {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.6);
+      margin-top: 1rem;
+      text-align: center;
+      display: none;
+    }
+
+    .status-message.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="poll-container" id="pollContainer">
+    <div class="poll-header">
+      <div class="poll-question" id="pollQuestion">¿Cuál es tu opinión?</div>
+      <div class="poll-timer" id="pollTimer"></div>
+    </div>
+
+    <form class="poll-options" id="pollForm">
+      <!-- Options will be populated here -->
+    </form>
+
+    <div class="poll-controls">
+      <button type="submit" class="btn btn-vote" id="voteButton">Votar</button>
+    </div>
+
+    <div class="status-message" id="statusMessage"></div>
+  </div>
+
+  <script>
+    /**
+     * Overlay Poll Widget
+     * Comunicación bidireccional con el player vía postMessage
+     */
+
+    // Estado local del overlay
+    const state = {
+      pollId: null,
+      question: null,
+      options: [],
+      counts: {},
+      durationMs: null,
+      startTimeMs: null,
+      selectedOptionId: null,
+      voted: false,
+      closed: false,
+    };
+
+    const elements = {
+      container: document.getElementById('pollContainer'),
+      question: document.getElementById('pollQuestion'),
+      timer: document.getElementById('pollTimer'),
+      form: document.getElementById('pollForm'),
+      voteButton: document.getElementById('voteButton'),
+      statusMessage: document.getElementById('statusMessage'),
+    };
+
+    /**
+     * Event listener para mensajes desde el player
+     */
+    window.addEventListener('message', (event) => {
+      // En sandbox sin allow-same-origin, event.origin será 'null' para srcdoc
+      // No podemos validar origen de la misma forma, pero el iframe está sandboxed
+      console.debug('[Poll Overlay] Message received:', event.data);
+
+      const message = event.data;
+      if (!message || !message.type) return;
+
+      if (message.type === 'interaction:poll_open') {
+        handlePollOpen(message.data);
+      } else if (message.type === 'interaction:poll_close') {
+        handlePollClose(message.data);
+      } else if (message.type === 'interaction:stats_update') {
+        handleStatsUpdate(message.data);
+      }
+    });
+
+    /**
+     * Maneja la apertura de una encuesta (poll_open)
+     */
+    function handlePollOpen(event) {
+      state.pollId = event.poll_id;
+      state.question = event.question;
+      state.options = event.options || [];
+      state.durationMs = event.duration_ms;
+      state.startTimeMs = Date.now();
+      state.voted = false;
+      state.closed = false;
+      state.counts = {};
+      state.selectedOptionId = null;
+
+      // Renderizar pregunta
+      elements.question.textContent = state.question;
+
+      // Renderizar opciones
+      elements.form.innerHTML = '';
+      state.options.forEach((option) => {
+        const label = document.createElement('label');
+        label.className = 'poll-option';
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'poll_option';
+        input.value = option.id;
+        input.addEventListener('change', () => {
+          state.selectedOptionId = option.id;
+        });
+
+        const text = document.createElement('span');
+        text.className = 'poll-option-text';
+        text.textContent = option.text;
+
+        const progress = document.createElement('div');
+        progress.className = 'poll-option-progress';
+        progress.innerHTML = `
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text">0%</div>
+        `;
+
+        label.appendChild(input);
+        label.appendChild(text);
+        label.appendChild(progress);
+        elements.form.appendChild(label);
+      });
+
+      // Mostrar contenedor
+      elements.container.classList.add('visible');
+
+      // Iniciar timer
+      startPollTimer();
+
+      // Limpiar estado de mensaje
+      elements.statusMessage.classList.remove('visible');
+    }
+
+    /**
+     * Maneja la actualización de conteos (stats_update)
+     */
+    function handleStatsUpdate(event) {
+      state.counts = event.counts || {};
+
+      // Calcular total de votos
+      const total = Object.values(state.counts).reduce((sum, count) => sum + count, 0);
+
+      // Actualizar barras de progreso
+      const options = elements.form.querySelectorAll('.poll-option');
+      options.forEach((label, index) => {
+        const option = state.options[index];
+        const count = state.counts[option.id] || 0;
+        const percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+
+        const progressFill = label.querySelector('.progress-fill');
+        const progressText = label.querySelector('.progress-text');
+
+        if (progressFill) {
+          progressFill.style.width = percentage + '%';
+        }
+        if (progressText) {
+          progressText.textContent = percentage + '%';
+        }
+      });
+    }
+
+    /**
+     * Maneja el cierre de la encuesta (poll_close)
+     */
+    function handlePollClose(event) {
+      state.closed = true;
+
+      // Deshabilitar votación
+      elements.voteButton.disabled = true;
+      const inputs = elements.form.querySelectorAll('input');
+      inputs.forEach((input) => (input.disabled = true));
+
+      // Mostrar mensaje de cierre
+      showStatus('Encuesta cerrada');
+
+      // Ocultar después de 3 segundos
+      setTimeout(() => {
+        elements.container.classList.remove('visible');
+      }, 3000);
+    }
+
+    /**
+     * Inicia el temporizador de la encuesta
+     */
+    function startPollTimer() {
+      const interval = setInterval(() => {
+        if (state.closed || !state.startTimeMs || !state.durationMs) {
+          clearInterval(interval);
+          return;
+        }
+
+        const elapsed = Date.now() - state.startTimeMs;
+        const remaining = Math.max(0, state.durationMs - elapsed);
+        const seconds = Math.ceil(remaining / 1000);
+
+        elements.timer.textContent = `${seconds} segundo${seconds !== 1 ? 's' : ''} restante${seconds !== 1 ? 's' : ''}`;
+
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 100);
+    }
+
+    /**
+     * Maneja el envío del voto
+     */
+    elements.form.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      if (state.closed || state.voted || !state.selectedOptionId) {
+        return;
+      }
+
+      // Marcar como votado
+      state.voted = true;
+
+      // Deshabilitar opciones
+      const inputs = elements.form.querySelectorAll('input');
+      inputs.forEach((input) => (input.disabled = true));
+      elements.voteButton.disabled = true;
+
+      // Enviar voto al player vía postMessage
+      const voteMessage = {
+        type: 'interaction:vote',
+        data: {
+          poll_id: state.pollId,
+          option_id: state.selectedOptionId,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      window.parent.postMessage(voteMessage, '*');
+      showStatus('✓ Voto registrado');
+    });
+
+    /**
+     * Muestra un mensaje de estado
+     */
+    function showStatus(message) {
+      elements.statusMessage.textContent = message;
+      elements.statusMessage.classList.add('visible');
+    }
+
+    console.debug('[Poll Overlay] Ready for interaction events');
+  </script>
+</body>
+</html>
