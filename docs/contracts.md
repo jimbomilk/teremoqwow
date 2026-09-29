@@ -27,6 +27,25 @@
 | Registry (nodos, join) | [schemas/registry/](../schemas/registry/) | MoQ Core |
 | API pública (OpenAPI KrakenD, interacciones) | [schemas/api/](../schemas/api/) | Arquitecto |
 
+## Endpoints KrakenD (API Gateway)
+
+Contratos de los endpoints públicos expuestos por KrakenD en `config/krakend/krakend.json`.
+
+| Método | Path | Backend upstream | Descripción |
+|---|---|---|---|
+| `GET` | `/health` | moq-relay `:8090/health` | Estado del relay; devuelve `{"status":"ok"}` |
+| `POST` | `/registry/join` | relay/registry_server `:8080/join` | Registro de nodo en el clúster federado |
+| `POST` | `/stripe/webhook` | comercial/billing `webhook_handler.py` | Eventos Stripe (invoice, subscription) |
+| `POST` | `/drm/license` | EZDRM license server | Emisión de licencia Widevine/PlayReady/FairPlay |
+| `POST` | `/interactions` | sync & telemetry track | Eventos de interactividad (polls, reacciones) |
+
+### Convenciones de respuesta
+
+- Éxito: HTTP 200 con cuerpo JSON conforme al esquema `schemas/api/v1/`.
+- Error de cliente: HTTP 400 con `{"error": "<mensaje>"}`.
+- Error de servidor: HTTP 502/503 con `{"error": "upstream_error"}` — nunca exponer detalles internos.
+- Autenticación: Bearer JWT en cabecera `Authorization` para todos los endpoints excepto `/health`.
+
 ## Validación
 
 Todos los esquemas se validan en CI mediante [`scripts/validate-schemas.sh`](../scripts/validate-schemas.sh) (usa `ajv-cli`).

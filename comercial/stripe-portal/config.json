@@ -1,0 +1,35 @@
+{
+  "billing_portal": {
+    "features": {
+      "customer_update": {
+        "enabled": true,
+        "allowed_updates": ["email", "address", "phone", "tax_id"]
+      },
+      "payment_method_update": {
+        "enabled": true
+      },
+      "invoice_history": {
+        "enabled": true
+      },
+      "subscription_cancel": {
+        "enabled": true,
+        "mode": "at_period_end",
+        "proration_behavior": "none"
+      },
+      "subscription_pause": {
+        "enabled": false
+      },
+      "subscription_update": {
+        "enabled": true,
+        "default_allowed_updates": ["price", "quantity"],
+        "proration_behavior": "create_prorations"
+      }
+    },
+    "business_profile": {
+      "headline": "teremoqwow — gestión de suscripción",
+      "privacy_policy_url": "https://teremoqwow.dev/legal/privacy",
+      "terms_of_service_url": "https://teremoqwow.dev/legal/terms"
+    },
+    "return_url": "https://teremoqwow.dev/account"
+  }
+}

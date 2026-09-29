@@ -1,0 +1,54 @@
+# Site24x7 — configuración stub de monitoreo 24/7
+# Requiere API key real en SITE24X7_API_KEY (env/secret).
+
+site24x7:
+  api_key: "${SITE24X7_API_KEY}"   # inyectar desde vault/secret
+  location_profile: global          # perfil de ubicaciones de sondas
+
+  website_monitors:
+    - name: "teremoqwow /health"
+      url: "https://api.teremoqwow.dev/health"
+      method: GET
+      check_interval: 1           # minutos
+      timeout: 10                 # segundos
+      expected_status: 200
+      alert_threshold:
+        availability: 99.99       # SLO
+        response_time_ms: 700     # P95 SLO
+
+    - name: "teremoqwow /registry/join"
+      url: "https://api.teremoqwow.dev/registry/join"
+      method: POST
+      check_interval: 1
+      timeout: 10
+      expected_status: 200
+
+    - name: "teremoqwow /drm/license"
+      url: "https://api.teremoqwow.dev/drm/license"
+      method: POST
+      check_interval: 1
+      timeout: 10
+      expected_status: [200, 400]  # 400 sin payload es aceptable en sonda
+
+    - name: "teremoqwow /interactions"
+      url: "https://api.teremoqwow.dev/interactions"
+      method: POST
+      check_interval: 1
+      timeout: 10
+      expected_status: [200, 400]
+
+  alert_groups:
+    - name: ops-primary
+      channels:
+        slack:
+          webhook_url: "${SLACK_WEBHOOK_URL}"   # stub
+          channel: "#alertas-produccion"
+        pagerduty:
+          integration_key: "${PAGERDUTY_KEY}"  # stub
+          severity: critical
+
+  notification_profile:
+    downtime_notification: true
+    notify_after: 1              # minutos sin respuesta antes de alertar
+    re_notify_interval: 15       # minutos entre re-notificaciones
+    escalation_wait: 5           # minutos hasta escalar a PagerDuty

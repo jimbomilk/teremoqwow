@@ -1,0 +1,81 @@
+# Moesif Developer Portal — configuración stub
+# Requiere MOESIF_APPLICATION_ID en env/secret.
+
+moesif:
+  application_id: "${MOESIF_APPLICATION_ID}"
+  api_base: "https://api.moesif.net/v1"
+
+  developer_portal:
+    endpoints:
+      - path: /account/usage
+        method: GET
+        description: "Uso de API del cliente actual (requests, errores, latencia P95)"
+        response_schema:
+          type: object
+          properties:
+            period_start:
+              type: string
+              format: date-time
+            period_end:
+              type: string
+              format: date-time
+            total_requests:
+              type: integer
+            error_requests:
+              type: integer
+            p95_latency_ms:
+              type: number
+          required: [period_start, period_end, total_requests, error_requests, p95_latency_ms]
+
+      - path: /account/invoices
+        method: GET
+        description: "Historial de facturas del cliente (delegado a Stripe)"
+        response_schema:
+          type: array
+          items:
+            type: object
+            properties:
+              invoice_id:
+                type: string
+              amount_due:
+                type: number
+              currency:
+                type: string
+              status:
+                type: string
+                enum: [draft, open, paid, uncollectible, void]
+              period_start:
+                type: string
+                format: date-time
+              pdf_url:
+                type: string
+                format: uri
+            required: [invoice_id, amount_due, currency, status, period_start]
+
+      - path: /account/api-keys
+        method: GET
+        description: "Listado de API keys activas del cliente"
+        response_schema:
+          type: array
+          items:
+            type: object
+            properties:
+              key_id:
+                type: string
+              label:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+              last_used_at:
+                type: string
+                format: date-time
+              scopes:
+                type: array
+                items:
+                  type: string
+            required: [key_id, label, created_at, scopes]
+
+  governance:
+    rate_limit_header: X-RateLimit-Remaining
+    quota_exceeded_status: 429
