@@ -223,15 +223,16 @@ async function loadBroadcasts() {
   const data = await r.json();
   const rows = data.map(b => `
     <tr>
-      <td><code>${b.id}</code></td>
-      <td><span class="badge ${b.status==='active'?'green':'red'}">${b.status}</span></td>
+      <td><code>${b.id}</code>${b.simulated?'<span class="badge yellow" style="margin-left:4px">sim</span>':''}</td>
+      <td><span class="badge ${b.status==='active'?'green':b.status==='stopped'?'yellow':'red'}">${b.status}</span></td>
       <td>${(b.bitrate_kbps/1000).toFixed(1)} Mbps</td>
       <td>${b.viewers}</td>
       <td>${b.encoder||'—'}</td>
-      <td>
+      <td style="display:flex;gap:4px">
         ${b.status==='active'
-          ? `<button class="btn danger" onclick="killBroadcast('${b.id}')">Kill</button>`
-          : '—'}
+          ? `<button class="btn danger" onclick="killBroadcast('${b.id}')">Kill</button>
+             <button class="btn danger" onclick="stopInject('${b.id}')">⏹ Parar</button>`
+          : '<button class="btn" onclick="injectBroadcast(\'' + b.id + '\', 4000)">▶ Reinyectar</button>'}
       </td>
     </tr>`).join('');
   setContent(`
@@ -240,14 +241,42 @@ async function loadBroadcasts() {
       <div class="card"><div class="label">Total viewers</div><div class="value">${data.reduce((s,b)=>s+b.viewers,0)}</div></div>
       <div class="card"><div class="label">Bitrate total</div><div class="value">${(data.reduce((s,b)=>s+b.bitrate_kbps,0)/1000).toFixed(1)} Mbps</div></div>
     </div>
-    <div class="section-title">Broadcasts activos</div>
-    <table><thead><tr><th>Broadcast</th><th>Estado</th><th>Bitrate</th><th>Viewers</th><th>Encoder</th><th>Acción</th></tr></thead>
+    <div class="section-title">Simulador de stream</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem">
+        <div><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Broadcast ID</div>
+          <input id="inj-id" value="anon/live1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+        <div><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Bitrate (kbps)</div>
+          <input id="inj-br" type="number" value="4000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      </div>
+      <button class="btn" style="background:rgba(76,175,80,0.15);border-color:var(--green);color:var(--green)" onclick="injectFromForm()">▶ Inyectar vídeo de prueba</button>
+      <span id="inj-status" style="margin-left:1rem;font-size:0.8rem;color:var(--muted)"></span>
+    </div>
+    <div class="section-title">Broadcasts</div>
+    <table><thead><tr><th>Broadcast</th><th>Estado</th><th>Bitrate</th><th>Viewers</th><th>Encoder</th><th>Acciones</th></tr></thead>
     <tbody>${rows}</tbody></table>`);
 }
 
 async function killBroadcast(id) {
   if (!confirm(`¿Matar broadcast ${id}?`)) return;
-  await api(`/admin/broadcasts/${encodeURIComponent(id)}/kill`, {method:'POST'});
+  await api('/admin/broadcasts/kill', {method:'POST', body: JSON.stringify({broadcast_id: id})});
+  loadBroadcasts();
+}
+async function injectBroadcast(id, bitrate) {
+  const st = document.getElementById('inj-status');
+  if (st) st.textContent = 'Inyectando...';
+  const r = await api('/admin/broadcasts/inject', {method:'POST', body: JSON.stringify({broadcast_id: id, bitrate_kbps: bitrate})});
+  const d = await r.json();
+  if (st) st.textContent = d.note || 'OK';
+  setTimeout(() => loadBroadcasts(), 800);
+}
+async function injectFromForm() {
+  const id = document.getElementById('inj-id')?.value || 'anon/live1';
+  const br = parseInt(document.getElementById('inj-br')?.value || '4000');
+  await injectBroadcast(id, br);
+}
+async function stopInject(id) {
+  await api('/admin/broadcasts/stop-inject', {method:'POST', body: JSON.stringify({broadcast_id: id})});
   loadBroadcasts();
 }
 
@@ -263,8 +292,20 @@ async function loadFederation() {
       <div class="card"><div class="label">Nodos activos</div><div class="value green">${active.length}</div></div>
       <div class="card"><div class="label">Pendientes</div><div class="value yellow">${pending.length}</div></div>
     </div>
+    <div class="section-title">Simular nodo externo</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Node ID</div>
+        <input id="fed-id" placeholder="sim-relay-xxx" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Región</div>
+        <input id="fed-region" value="eu-west-1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <button class="btn" onclick="simulateNode()">+ Simular nodo</button>
+    </div>
     <div class="section-title">Nodos pendientes de aprobación</div>
-    ${pending.length ? `<table><thead><tr><th>Node ID</th><th>Región</th><th>Acción</th></tr></thead><tbody>${pRows}</tbody></table>`
+    ${pending.length ? `<table><thead><tr><th>Node ID</th><th>Región</th><th>Sim</th><th>Acción</th></tr></thead><tbody>${
+      pending.map(n=>`<tr><td>${n.id||'—'}</td><td>${n.region||'—'}</td><td>${n.simulated?'<span class="badge yellow">sim</span>':'—'}</td>
+      <td><button class="btn" onclick="approveNode('${n.id}')">Aprobar</button>
+      <button class="btn danger" onclick="revokeNode('${n.id}')">Revocar</button></td></tr>`).join('')
+    }</tbody></table>`
       : '<p style="color:var(--muted);font-size:0.85rem">No hay nodos pendientes</p>'}`);
 }
 
@@ -276,22 +317,52 @@ async function revokeNode(id) {
   await api(`/admin/federation/nodes/${id}/revoke`, {method:'POST'});
   loadFederation();
 }
+async function simulateNode() {
+  const id     = document.getElementById('fed-id')?.value.trim() || '';
+  const region = document.getElementById('fed-region')?.value.trim() || 'eu-west-1';
+  const body   = id ? {node_id: id, region} : {region};
+  const r = await api('/admin/federation/simulate-node', {method:'POST', body: JSON.stringify(body)});
+  const d = await r.json();
+  loadFederation();
+}
 
 // ── DRM / Rights ──────────────────────────────────────────────────────────────
 async function loadDRM() {
-  const r = await api('/admin/drm/subscriptions');
-  const subs = await r.json();
-  const rows = subs.map(s => `<tr><td><code>${s.subscription_id}</code></td>
-    <td>${s.plays_used}</td>
-    <td><button class="btn" onclick="resetSub('${s.subscription_id}')">Reset</button>
-    <button class="btn danger" onclick="revokeSub('${s.subscription_id}')">Revocar JWT</button></td></tr>`).join('');
+  const [subsR, simR] = await Promise.all([
+    api('/admin/drm/subscriptions'),
+    api('/admin/drm/subscriptions/sim-list'),
+  ]);
+  const subs = await subsR.json();
+  const simSubs = await simR.json();
+  const allSubs = [...subs, ...simSubs.filter(s => !subs.find(x=>x.subscription_id===s.subscription_id))];
+  const rows = allSubs.map(s => {
+    const pct = s.max_plays ? Math.min(100, Math.round((s.plays_used/s.max_plays)*100)) : 0;
+    const bar = s.max_plays ? `<div style="width:80px;height:6px;background:var(--border);border-radius:3px;display:inline-block;margin-left:6px"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--red)':pct>60?'var(--yellow)':'var(--green)'};border-radius:3px"></div></div>` : '';
+    return `<tr>
+      <td><code>${s.subscription_id}</code>${s.max_plays?'':''}</td>
+      <td>${s.plays_used}${s.max_plays?`/${s.max_plays}`:''}${bar}</td>
+      <td style="display:flex;gap:4px">
+        ${s.max_plays?`<button class="btn" onclick="consumePlay('${s.subscription_id}')">+1 Play</button>`:''}
+        <button class="btn" onclick="resetSub('${s.subscription_id}')">Reset</button>
+        <button class="btn danger" onclick="revokeSub('${s.subscription_id}')">Revocar</button>
+      </td></tr>`;
+  }).join('');
   setContent(`
     <div class="grid-3">
-      <div class="card"><div class="label">Suscripciones con plays</div><div class="value">${subs.length}</div></div>
+      <div class="card"><div class="label">Subs Redis</div><div class="value">${subs.length}</div></div>
+      <div class="card"><div class="label">Subs simuladas</div><div class="value yellow">${simSubs.length}</div></div>
     </div>
-    <div class="section-title">Contador max_plays por suscripción</div>
-    ${subs.length ? `<table><thead><tr><th>Subscription ID</th><th>Plays usados</th><th>Acción</th></tr></thead><tbody>${rows}</tbody></table>`
-      : '<p style="color:var(--muted);font-size:0.85rem">Sin datos (Redis vacío o no conectado)</p>'}`);
+    <div class="section-title">Simulador DRM</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Subscription ID</div>
+        <input id="drm-id" placeholder="sub_auto" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <div style="width:80px"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Max plays</div>
+        <input id="drm-max" type="number" value="5" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <button class="btn" onclick="createSimSub()">+ Crear</button>
+    </div>
+    <div class="section-title">Suscripciones activas</div>
+    ${allSubs.length ? `<table><thead><tr><th>Subscription ID</th><th>Plays</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p style="color:var(--muted);font-size:0.85rem">Sin datos — crea una suscripción de prueba</p>'}`);
 }
 
 async function resetSub(id) {
@@ -301,6 +372,19 @@ async function resetSub(id) {
 async function revokeSub(id) {
   if (!confirm(`¿Revocar acceso de ${id}?`)) return;
   await api(`/admin/drm/subscriptions/${id}/revoke`, {method:'POST'});
+  loadDRM();
+}
+async function createSimSub() {
+  const id  = document.getElementById('drm-id')?.value.trim() || '';
+  const max = parseInt(document.getElementById('drm-max')?.value || '5');
+  const body = id ? {subscription_id: id, max_plays: max} : {max_plays: max};
+  await api('/admin/drm/subscriptions/simulate', {method:'POST', body: JSON.stringify(body)});
+  loadDRM();
+}
+async function consumePlay(id) {
+  const r = await api('/admin/drm/subscriptions/consume', {method:'POST', body: JSON.stringify({subscription_id: id})});
+  const d = await r.json();
+  if (!d.allowed) alert(`❌ max_plays (${d.max_plays}) superado para ${id}`);
   loadDRM();
 }
 
@@ -332,21 +416,65 @@ async function loadQoS() {
     api('/admin/qos/alerts'),
     api('/admin/qos/latency'),
   ]);
-  const {alerts} = await alertsR.json();
+  const alertData = await alertsR.json();
+  const {alerts} = alertData;
   const latency = await latencyR.json();
   const alertsHtml = alerts.length
-    ? alerts.map(a => `<div class="alert-item"><span class="aname">${a.labels?.alertname||'?'}</span> — ${a.annotations?.description||a.annotations?.summary||''}</div>`).join('')
+    ? alerts.map(a => {
+        const sim = a.labels?.source === 'simulated';
+        return `<div class="alert-item" style="${sim?'border-color:rgba(255,193,7,0.4);background:rgba(255,193,7,0.08)':''}">
+          <span class="aname">${a.labels?.alertname||'?'}</span>
+          ${sim ? '<span class="badge yellow" style="margin-left:6px">simulada</span>' : ''}
+          — ${a.annotations?.description||a.annotations?.summary||''}
+          ${sim ? `<button class="btn" style="float:right;font-size:0.72rem;padding:2px 8px" onclick="resolveAlert('${a.id}')">Resolver</button>` : ''}
+        </div>`;
+      }).join('')
     : '<p style="color:var(--green);font-size:0.85rem">✓ Sin alertas activas</p>';
   const latRows = latency.map(r => `<tr><td><code>${r.namespace}</code></td>
     <td class="${r.p95>700?'red':''}">${r.p95||0} ms</td><td>${r.samples}</td></tr>`).join('');
   const grafana = window.GRAFANA_URL || 'http://localhost:3000';
+  // Comprobar si Grafana está disponible
+  let grafanaAvailable = false;
+  try {
+    const gr = await fetch(`${grafana}/api/health`, {signal: AbortSignal.timeout(2000)});
+    grafanaAvailable = gr.ok;
+  } catch(e) { grafanaAvailable = false; }
+
+  const grafanaHtml = grafanaAvailable
+    ? `<iframe class="grafana" src="${grafana}/d/teremoqwow?orgId=1&kiosk=tv" title="Grafana"></iframe>`
+    : `<div style="background:var(--surface);border:1px dashed var(--border);border-radius:8px;padding:2rem;text-align:center;color:var(--muted)">
+        <div style="font-size:1.5rem;margin-bottom:0.5rem">📊</div>
+        <div style="margin-bottom:0.5rem">Grafana no está disponible en modo dev sin Docker</div>
+        <div style="font-size:0.8rem">Para ver el dashboard completo: <code style="background:var(--bg);padding:2px 6px;border-radius:4px">docker compose up grafana prometheus</code></div>
+        <div style="margin-top:1rem"><a href="${grafana}" target="_blank" style="color:var(--accent)">${grafana}</a></div>
+       </div>`;
+
+  const alertNames = ['LipSyncDrift','BufferBelowThreshold','HighE2ELatency','VideoContinuityError'];
   setContent(`
-    <div class="section-title">Alertas Prometheus activas</div>
+    <div class="section-title">Alertas Prometheus activas ${alertData.simulated?`<span style="color:var(--muted);font-size:0.75rem">(${alertData.simulated} simuladas)</span>`:''}</div>
     ${alertsHtml}
+    <div class="section-title" style="margin-top:1.25rem">Consola de pruebas — disparar alerta</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Tipo de alerta</div>
+        <select id="alert-type" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem">
+          ${alertNames.map(n=>`<option value="${n}">${n}</option>`).join('')}
+        </select></div>
+      <button class="btn" style="border-color:var(--red);color:var(--red)" onclick="fireAlert()">🔥 Disparar</button>
+    </div>
     <div class="section-title" style="margin-top:1.25rem">Latencia P95 por broadcast (últimos 15 min)</div>
     <table><thead><tr><th>Namespace</th><th>P95</th><th>Muestras</th></tr></thead><tbody>${latRows}</tbody></table>
     <div class="section-title" style="margin-top:1.25rem">Dashboard Grafana</div>
-    <iframe class="grafana" src="${grafana}/d/teremoqwow?orgId=1&kiosk=tv" title="Grafana"></iframe>`);
+    ${grafanaHtml}`);
+}
+
+async function fireAlert() {
+  const name = document.getElementById('alert-type')?.value;
+  await api('/admin/qos/alerts/test', {method:'POST', body: JSON.stringify({alert_name: name})});
+  loadQoS();
+}
+async function resolveAlert(id) {
+  await api('/admin/qos/alerts/resolve', {method:'POST', body: JSON.stringify({id})});
+  loadQoS();
 }
 
 // ── Seguridad ─────────────────────────────────────────────────────────────────

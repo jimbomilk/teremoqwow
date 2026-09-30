@@ -21,11 +21,13 @@ from typing import Optional
 
 import jwt
 from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app, origins='*')  # dev only
 
 # ── Auth helper ────────────────────────────────────────────────────────────────
 

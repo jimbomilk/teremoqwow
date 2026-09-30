@@ -19,11 +19,13 @@ from typing import Optional
 
 import jwt
 from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app, origins='*')  # dev only
 
 ADMIN_ROLES = {"admin", "superadmin"}
 OPERATOR_ROLES = {"admin", "superadmin", "operator"}
@@ -152,6 +154,74 @@ def kill_broadcast():
     return jsonify({"status": "killed", "broadcast": bcast_key}), 200
 
 
+@app.route("/admin/broadcasts/inject", methods=["POST"])
+def inject_broadcast():
+    """Arranca un inyector FFmpeg→MoQ para simular un stream en vivo."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    broadcast_id = body.get("broadcast_id", "anon/live1")
+    bitrate = int(body.get("bitrate_kbps", 4000))
+    gop = int(body.get("gop_frames", 15))
+
+    # Intentar con Docker si está disponible
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["docker", "run", "-d", "--rm",
+             "--name", "admin-inject",
+             "--network", "teremoqwow-dev",
+             "linuxserver/ffmpeg:latest",
+             "-re", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=30",
+             "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000",
+             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+             "-profile:v", "main", "-level", "4.0",
+             f"-g", str(gop), f"-keyint_min", str(gop), "-sc_threshold", "0",
+             "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", "pipe:1"],
+            capture_output=True, text=True, timeout=5
+        )
+        docker_ok = result.returncode == 0
+    except Exception:
+        docker_ok = False
+
+    # Actualizar estado en memoria independientemente de Docker
+    _broadcasts[broadcast_id] = {
+        "id": broadcast_id,
+        "status": "active",
+        "bitrate_kbps": bitrate,
+        "viewers": 0,
+        "uptime_s": 0,
+        "encoder": "ffmpeg-testsrc2 (simulado)" if not docker_ok else "ffmpeg-testsrc2",
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "killed": False,
+        "simulated": not docker_ok,
+    }
+    _audit(claims, "inject_broadcast", broadcast_id)
+    return jsonify({
+        "status": "injecting",
+        "broadcast": broadcast_id,
+        "docker": docker_ok,
+        "note": "Stream simulado (Docker no disponible)" if not docker_ok else "Stream real inyectado",
+    }), 200
+
+
+@app.route("/admin/broadcasts/stop-inject", methods=["POST"])
+def stop_inject():
+    """Para el inyector FFmpeg."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    import subprocess
+    try:
+        subprocess.run(["docker", "rm", "-f", "admin-inject"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+    broadcast_id = (request.get_json(silent=True) or {}).get("broadcast_id", "anon/live1")
+    if broadcast_id in _broadcasts:
+        _broadcasts[broadcast_id]["status"] = "stopped"
+    _audit(claims, "stop_inject", broadcast_id)
+    return jsonify({"status": "stopped"}), 200
+
+
 @app.route("/admin/broadcasts/config", methods=["PATCH"])
 def patch_broadcast():
     claims, err = _require_role(*OPERATOR_ROLES)
@@ -170,6 +240,27 @@ def patch_broadcast():
 # ── MÓDULO: Federación ─────────────────────────────────────────────────────────
 
 _pending_nodes: list[dict] = []  # nodos pendientes de aprobación
+_sim_subscriptions: dict[str, dict] = {}  # suscripciones de prueba
+
+
+@app.route("/admin/federation/simulate-node", methods=["POST"])
+def simulate_node():
+    """Genera un nodo externo simulado que aparece como pendiente."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    node_id = body.get("node_id", f"sim-relay-{secrets.token_hex(3)}")
+    region  = body.get("region", "eu-west-1")
+    node = {
+        "id": node_id,
+        "region": region,
+        "endpoint": f"tcp://{node_id}.dev.local:4444",
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "simulated": True,
+    }
+    _pending_nodes.append(node)
+    _audit(claims, "simulate_node", node_id)
+    return jsonify({"status": "pending", "node": node}), 201
 
 
 @app.route("/admin/federation/nodes", methods=["GET"])
@@ -203,6 +294,60 @@ def revoke_node(node_id: str):
 
 
 # ── MÓDULO: DRM / Rights ──────────────────────────────────────────────────────
+
+@app.route("/admin/drm/subscriptions/simulate", methods=["POST"])
+def simulate_subscription():
+    """Crea una suscripción de prueba con max_plays configurable."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    sub_id = body.get("subscription_id", f"sim_{secrets.token_hex(4)}")
+    max_plays = int(body.get("max_plays", 5))
+    r = _redis()
+    if r:
+        try:
+            r.set(f"rights:{sub_id}:plays", 0, ex=3600)
+            r.set(f"rights:{sub_id}:max", max_plays, ex=3600)
+        except Exception:
+            pass
+    _sim_subscriptions[sub_id] = {"subscription_id": sub_id, "max_plays": max_plays, "plays_used": 0}
+    _audit(claims, "simulate_subscription", sub_id)
+    return jsonify({"subscription_id": sub_id, "max_plays": max_plays, "plays_used": 0}), 201
+
+
+@app.route("/admin/drm/subscriptions/consume", methods=["POST"])
+def consume_play():
+    """Simula una reproducción: incrementa el contador."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    sub_id = (request.get_json(silent=True) or {}).get("subscription_id", "")
+    r = _redis()
+    if r:
+        try:
+            plays = r.incr(f"rights:{sub_id}:plays")
+            max_plays = int(r.get(f"rights:{sub_id}:max") or 0)
+            allowed = plays <= max_plays
+            if sub_id in _sim_subscriptions:
+                _sim_subscriptions[sub_id]["plays_used"] = plays
+            return jsonify({"subscription_id": sub_id, "plays_used": plays,
+                            "max_plays": max_plays, "allowed": allowed}), 200
+        except Exception:
+            pass
+    if sub_id in _sim_subscriptions:
+        _sim_subscriptions[sub_id]["plays_used"] += 1
+        plays = _sim_subscriptions[sub_id]["plays_used"]
+        max_plays = _sim_subscriptions[sub_id]["max_plays"]
+        return jsonify({"subscription_id": sub_id, "plays_used": plays,
+                        "max_plays": max_plays, "allowed": plays <= max_plays}), 200
+    return jsonify({"error": "suscripción no encontrada"}), 404
+
+
+@app.route("/admin/drm/subscriptions/sim-list", methods=["GET"])
+def list_sim_subscriptions():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify(list(_sim_subscriptions.values())), 200
+
 
 @app.route("/admin/drm/subscriptions", methods=["GET"])
 def list_subscriptions():
@@ -297,19 +442,63 @@ def stripe_events():
 
 # ── MÓDULO: QoS ───────────────────────────────────────────────────────────────
 
+_sim_alerts: list[dict] = []  # alertas ficticias inyectadas desde el admin
+
+_ALERT_TEMPLATES = {
+    "LipSyncDrift":         {"severity": "critical", "description": "A/V offset simulado: 52ms > 45ms"},
+    "BufferBelowThreshold": {"severity": "warning",  "description": "Buffer simulado: 320ms < 500ms"},
+    "HighE2ELatency":       {"severity": "warning",  "description": "P95 latencia simulada: 850ms > 700ms"},
+    "VideoContinuityError": {"severity": "critical", "description": "Error de continuidad simulado en anon/live1"},
+}
+
+
+@app.route("/admin/qos/alerts/test", methods=["POST"])
+def inject_test_alert():
+    """Inyecta una alerta ficticia visible en el módulo QoS."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    alert_name = (request.get_json(silent=True) or {}).get("alert_name", "LipSyncDrift")
+    if alert_name not in _ALERT_TEMPLATES:
+        return jsonify({"error": f"alerta desconocida, opciones: {list(_ALERT_TEMPLATES.keys())}"}), 400
+    tmpl = _ALERT_TEMPLATES[alert_name]
+    alert = {
+        "labels":      {"alertname": alert_name, "severity": tmpl["severity"], "source": "simulated"},
+        "annotations": {"description": tmpl["description"], "summary": f"[SIM] {alert_name}"},
+        "state":       "firing",
+        "activeAt":    time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "id":          secrets.token_hex(4),
+    }
+    _sim_alerts.append(alert)
+    _audit(claims, "inject_test_alert", alert_name)
+    return jsonify({"status": "fired", "alert": alert}), 201
+
+
+@app.route("/admin/qos/alerts/resolve", methods=["POST"])
+def resolve_test_alert():
+    """Elimina una alerta simulada por id."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    alert_id = (request.get_json(silent=True) or {}).get("id", "")
+    original = len(_sim_alerts)
+    _sim_alerts[:] = [a for a in _sim_alerts if a.get("id") != alert_id]
+    _audit(claims, "resolve_test_alert", alert_id)
+    return jsonify({"resolved": len(_sim_alerts) < original}), 200
+
+
 @app.route("/admin/qos/alerts", methods=["GET"])
 def qos_alerts():
     claims, err = _require_role(*ANALYST_ROLES)
     if err: return err
-    prom_url = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090")
+    prom_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+    real_alerts = []
     try:
         with urllib.request.urlopen(f"{prom_url}/api/v1/alerts", timeout=5) as resp:
             data = json.loads(resp.read())
-        alerts = data.get("data", {}).get("alerts", [])
-        return jsonify({"alerts": alerts, "count": len(alerts)}), 200
+        real_alerts = data.get("data", {}).get("alerts", [])
     except Exception as exc:
         logger.warning("admin: Prometheus: %s", exc)
-        return jsonify({"alerts": [], "count": 0, "error": str(exc)}), 200
+    all_alerts = real_alerts + _sim_alerts
+    return jsonify({"alerts": all_alerts, "count": len(all_alerts), "simulated": len(_sim_alerts)}), 200
 
 
 @app.route("/admin/qos/latency", methods=["GET"])
