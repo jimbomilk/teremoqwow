@@ -17,6 +17,14 @@
         color: #e0e0e0;
         padding: 2rem;
       }
+      /* Modo embed: solo canvas, sin UI */
+      body.embed { padding: 0; margin: 0; background: #000; overflow: hidden; }
+      body.embed .container > h1,
+      body.embed .container > .info,
+      body.embed .container > .stats,
+      body.embed .container > #error-container { display: none; }
+      body.embed .canvas-container { max-width: 100%; width: 100vw; }
+      body.embed moq-watch { width: 100vw; height: 100vh; border-radius: 0; aspect-ratio: unset; }
 
       .container {
         max-width: 1200px;
@@ -203,6 +211,8 @@
 
       // URLs inyectadas por Vite desde .env o parámetros de URL (?relay=...&broadcast=...)
       const _params = new URLSearchParams(location.search);
+      // Activar embed mode si ?embed=1
+      if (_params.get('embed') === '1') document.body.classList.add('embed');
       const canvas = document.getElementById('moq-canvas') as HTMLCanvasElement;
       const url = _params.get('relay')
         || canvas?.getAttribute('data-url')
@@ -212,7 +222,10 @@
         || canvas?.getAttribute('data-name')
         || import.meta.env.VITE_RELAY_BROADCAST
         || 'anon/live1';
-      const certHash = canvas?.getAttribute('data-cert-hash') || import.meta.env.VITE_MOQ_CERT_HASH || '';
+      const certHash = _params.get('cert')
+        || canvas?.getAttribute('data-cert-hash')
+        || import.meta.env.VITE_MOQ_CERT_HASH
+        || '';
 
       // Actualizar display del cert-hash
       const certHashDisplay = document.getElementById('cert-hash-display');

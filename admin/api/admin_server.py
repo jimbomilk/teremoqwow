@@ -116,19 +116,70 @@ def _redis():
 
 # ── MÓDULO: Broadcasts ─────────────────────────────────────────────────────────
 
-# Estado en memoria (en prod: leer del relay API / ClickHouse)
-_broadcasts: dict[str, dict] = {
-    "anon/live1": {
-        "id": "anon/live1",
+AUDIO_KBPS_DEFAULT = 128  # mínimo EBU R128 broadcast estéreo
+
+
+def _h264_level(resolution: str, fps: int) -> str:
+    w, h = (int(x) for x in resolution.lower().replace('x','×').replace('×',' ').split()[:2])
+    pixels = w * h
+    if pixels <= 414720 and fps <= 30:   # ≤720×576
+        return "3.0"
+    if pixels <= 921600 and fps <= 30:   # ≤1280×720
+        return "3.1"
+    if pixels <= 2073600 and fps <= 30:  # ≤1920×1080
+        return "4.0"
+    if pixels <= 2073600 and fps <= 60:
+        return "4.2"
+    return "5.0"
+
+
+def _default_broadcast(broadcast_id: str, bitrate_kbps: int = 8140, simulated: bool = False) -> dict:
+    audio_kbps = max(AUDIO_KBPS_DEFAULT, int(bitrate_kbps * 0.03))  # al menos 128
+    video_kbps = bitrate_kbps - audio_kbps
+    return {
+        "id": broadcast_id,
         "status": "active",
-        "bitrate_kbps": 8140,
+        "status_reason": "",
+        "bitrate_kbps": bitrate_kbps,
         "viewers": 0,
         "uptime_s": 0,
-        "encoder": "ffmpeg-testsrc2",
+        "encoder": "ffmpeg-testsrc2" + (" (simulado)" if simulated else ""),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "killed": False,
+        "simulated": simulated,
+        "ingest_type": "synthetic" if simulated else "testsrc2",
+        # Video
+        "video_codec": "H.264",
+        "video_profile": "Main",
+        "video_resolution": "1280x720",
+        "video_fps": 30,
+        "video_kbps": video_kbps,
+        "video_level": _h264_level("1280x720", 30),
+        # Audio
+        "audio_codec": "AAC",
+        "audio_kbps": audio_kbps,
+        "audio_channels": 2,
+        "audio_sample_rate": 48000,
+        "audio_tracks": [{"id": "t0", "lang": "es", "label": "Español", "pid": 481, "default": True}],
+        "lipsync_ms": 0,
     }
+
+# Estado en memoria (en prod: leer del relay API / ClickHouse)
+_broadcasts: dict[str, dict] = {
+    "anon/live1": _default_broadcast("anon/live1")
 }
+
+_audio_alerts: list[dict] = []
+_srt_ports: dict[str, int] = {}  # broadcast_id → puerto SRT asignado
+_SRT_PORT_BASE = 9998
+
+
+def _next_srt_port() -> int:
+    used = set(_srt_ports.values())
+    port = _SRT_PORT_BASE
+    while port in used:
+        port += 1
+    return port
 
 
 @app.route("/admin/broadcasts", methods=["GET"])
@@ -156,52 +207,147 @@ def kill_broadcast():
 
 @app.route("/admin/broadcasts/inject", methods=["POST"])
 def inject_broadcast():
-    """Arranca un inyector FFmpeg→MoQ para simular un stream en vivo."""
     claims, err = _require_role(*OPERATOR_ROLES)
     if err: return err
     body = request.get_json(silent=True) or {}
-    broadcast_id = body.get("broadcast_id", "anon/live1")
-    bitrate = int(body.get("bitrate_kbps", 4000))
-    gop = int(body.get("gop_frames", 15))
+    broadcast_id  = body.get("broadcast_id", "anon/live1")
+    ingest_type   = body.get("ingest_type", "testsrc2")  # testsrc2 | srt_push | srt_pull
+    vcfg = body.get("video", {})
+    acfg = body.get("audio", {})
+    srt  = body.get("srt", {})
 
-    # Intentar con Docker si está disponible
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["docker", "run", "-d", "--rm",
-             "--name", "admin-inject",
-             "--network", "teremoqwow-dev",
-             "linuxserver/ffmpeg:latest",
-             "-re", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=30",
-             "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000",
-             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-             "-profile:v", "main", "-level", "4.0",
-             f"-g", str(gop), f"-keyint_min", str(gop), "-sc_threshold", "0",
-             "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", "pipe:1"],
-            capture_output=True, text=True, timeout=5
+    resolution  = vcfg.get("resolution", "1280x720")
+    fps         = int(vcfg.get("fps", 30))
+    video_kbps  = int(vcfg.get("kbps", 4000))
+    gop         = int(vcfg.get("gop_frames", body.get("gop_frames", 30)))
+    profile     = vcfg.get("profile", "main").lower()
+    level       = vcfg.get("level") or _h264_level(resolution, fps)
+    audio_kbps  = max(AUDIO_KBPS_DEFAULT, int(acfg.get("kbps", AUDIO_KBPS_DEFAULT)))
+    channels    = int(acfg.get("channels", 2))
+    sample_rate = int(acfg.get("sample_rate", 48000))
+
+    docker_ok    = False
+    ffmpeg_cmd   = ""
+    srt_endpoint = None
+
+    if ingest_type == "testsrc2":
+        vf = f"testsrc2=size={resolution}:rate={fps}"
+        af = f"sine=frequency=1000:sample_rate={sample_rate}"
+        docker_args = [
+            "docker", "run", "-d", "--rm", "--name", "admin-inject",
+            "--network", "teremoqwow-e2e",
+            "linuxserver/ffmpeg:latest",
+            "-re", "-f", "lavfi", "-i", vf,
+            "-f", "lavfi", "-i", af,
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-profile:v", profile, "-level", level,
+            "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0",
+            "-b:v", f"{video_kbps}k",
+            "-c:a", "aac", "-b:a", f"{audio_kbps}k",
+            "-f", "mpegts", "pipe:1",
+        ]
+        import subprocess
+        try:
+            result = subprocess.run(docker_args, capture_output=True, text=True, timeout=5)
+            docker_ok = result.returncode == 0
+        except Exception:
+            docker_ok = False
+
+        moq_part = (
+            f'docker run --rm -i --network teremoqwow-e2e moqdev/moq:0.12.7 '
+            f'--connect tcp://moq-relay:4444/anon --broadcast {broadcast_id} import ts'
         )
-        docker_ok = result.returncode == 0
-    except Exception:
+        ffmpeg_cmd = (
+            f"docker run --rm -i --network teremoqwow-e2e linuxserver/ffmpeg:latest \\\n"
+            f"  -re -f lavfi -i '{vf}' \\\n"
+            f"  -f lavfi -i '{af}' \\\n"
+            f"  -c:v libx264 -preset ultrafast -tune zerolatency \\\n"
+            f"  -profile:v {profile} -level {level} -g {gop} -keyint_min {gop} -sc_threshold 0 \\\n"
+            f"  -b:v {video_kbps}k -c:a aac -b:a {audio_kbps}k -f mpegts pipe:1 | \\\n"
+            f"{moq_part}"
+        )
+
+    elif ingest_type == "srt_push":
+        port       = int(srt.get("port", _next_srt_port()))
+        latency_ms = int(srt.get("latency_ms", 200))
+        passphrase = srt.get("passphrase", "")
+        pp_part    = f"&passphrase={passphrase}" if passphrase else ""
+        srt_url    = f"srt://0.0.0.0:{port}?mode=listener&latency={latency_ms}{pp_part}"
+        _srt_ports[broadcast_id] = port
+        moq_part   = (
+            f'docker run --rm -i --network teremoqwow-e2e moqdev/moq:0.12.7 '
+            f'--connect tcp://moq-relay:4444/anon --broadcast {broadcast_id} import ts'
+        )
+        ffmpeg_cmd = (
+            f"# Escucha conexión SRT entrante en 0.0.0.0:{port}\n"
+            f"ffmpeg -i '{srt_url}' -c:v copy -c:a copy -f mpegts pipe:1 | \\\n"
+            f"{moq_part}"
+        )
+        host_ip = os.environ.get("HOST_IP", "0.0.0.0")
+        srt_endpoint = f"srt://{host_ip}:{port}?streamid={broadcast_id}&latency={latency_ms}"
         docker_ok = False
 
-    # Actualizar estado en memoria independientemente de Docker
+    elif ingest_type == "srt_pull":
+        encoder_host = srt.get("host", "")
+        port         = int(srt.get("port", 9998))
+        latency_ms   = int(srt.get("latency_ms", 200))
+        passphrase   = srt.get("passphrase", "")
+        pp_part      = f"&passphrase={passphrase}" if passphrase else ""
+        if not encoder_host:
+            return jsonify({"error": "srt.host es obligatorio para srt_pull"}), 400
+        srt_url  = f"srt://{encoder_host}:{port}?mode=caller&latency={latency_ms}{pp_part}"
+        moq_part = (
+            f'docker run --rm -i --network teremoqwow-e2e moqdev/moq:0.12.7 '
+            f'--connect tcp://moq-relay:4444/anon --broadcast {broadcast_id} import ts'
+        )
+        ffmpeg_cmd = (
+            f"# Conecta al encoder en {encoder_host}:{port}\n"
+            f"ffmpeg -i '{srt_url}' -c:v copy -c:a copy -f mpegts pipe:1 | \\\n"
+            f"{moq_part}"
+        )
+        docker_ok = False
+    else:
+        return jsonify({"error": f"ingest_type desconocido: {ingest_type}"}), 400
+
     _broadcasts[broadcast_id] = {
         "id": broadcast_id,
         "status": "active",
-        "bitrate_kbps": bitrate,
+        "status_reason": "",
+        "bitrate_kbps": video_kbps + audio_kbps,
         "viewers": 0,
         "uptime_s": 0,
-        "encoder": "ffmpeg-testsrc2 (simulado)" if not docker_ok else "ffmpeg-testsrc2",
+        "encoder": f"ffmpeg-{ingest_type}",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "killed": False,
-        "simulated": not docker_ok,
+        "simulated": not docker_ok and ingest_type == "testsrc2",
+        "ingest_type": ingest_type,
+        "video_codec": vcfg.get("codec", "H.264"),
+        "video_profile": vcfg.get("profile", "Main"),
+        "video_level": level,
+        "video_resolution": resolution,
+        "video_fps": fps,
+        "video_kbps": video_kbps,
+        "audio_codec": acfg.get("codec", "AAC"),
+        "audio_kbps": audio_kbps,
+        "audio_channels": channels,
+        "audio_sample_rate": sample_rate,
+        "audio_tracks": [{"id": "t0", "lang": "es", "label": "Español", "pid": 481, "default": True}],
+        "lipsync_ms": 0,
+        "srt_port": _srt_ports.get(broadcast_id),
+        "srt_endpoint": srt_endpoint,
     }
-    _audit(claims, "inject_broadcast", broadcast_id)
+    _audit(claims, f"inject_broadcast:{ingest_type}", broadcast_id)
     return jsonify({
         "status": "injecting",
         "broadcast": broadcast_id,
+        "ingest_type": ingest_type,
         "docker": docker_ok,
-        "note": "Stream simulado (Docker no disponible)" if not docker_ok else "Stream real inyectado",
+        "ffmpeg_cmd": ffmpeg_cmd,
+        "srt_endpoint": srt_endpoint,
+        "note": (
+            "Stream real inyectado" if docker_ok
+            else f"Copia el comando ffmpeg_cmd para iniciar la ingesta ({ingest_type})"
+        ),
     }), 200
 
 
@@ -235,6 +381,227 @@ def patch_broadcast():
             _broadcasts[bcast_key][field] = body[field]
     _audit(claims, "patch_broadcast", f"{bcast_key} {body}")
     return jsonify(_broadcasts[bcast_key]), 200
+
+
+# ── MÓDULO: Audio ─────────────────────────────────────────────────────────────
+
+@app.route("/admin/audio/tracks", methods=["GET"])
+def audio_tracks():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    result = [
+        {
+            "broadcast_id": b["id"],
+            "tracks": b.get("audio_tracks", []),
+            "codec": b.get("audio_codec", "AAC"),
+            "kbps": b.get("audio_kbps", 128),
+            "channels": b.get("audio_channels", 2),
+            "sample_rate": b.get("audio_sample_rate", 48000),
+        }
+        for b in _broadcasts.values()
+    ]
+    return jsonify(result), 200
+
+
+@app.route("/admin/audio/lipsync", methods=["GET"])
+def audio_lipsync():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify([
+        {
+            "broadcast_id": b["id"],
+            "lipsync_ms": b.get("lipsync_ms", 0),
+            "within_threshold": abs(b.get("lipsync_ms", 0)) < 40,
+            "threshold_ms": 40,
+        }
+        for b in _broadcasts.values()
+    ]), 200
+
+
+@app.route("/admin/audio/alerts", methods=["GET"])
+def audio_alerts_list():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify([a for a in _audio_alerts if not a.get("resolved")]), 200
+
+
+@app.route("/admin/audio/alerts/simulate", methods=["POST"])
+def simulate_audio_alert():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    kind = body.get("kind", "silence")  # silence | clipping | desync
+    if kind not in ("silence", "clipping", "desync"):
+        return jsonify({"error": "kind debe ser silence|clipping|desync"}), 400
+    broadcast_id = body.get("broadcast_id", "anon/live1")
+    alert = {
+        "id": secrets.token_hex(4),
+        "kind": kind,
+        "broadcast_id": broadcast_id,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "simulated": True,
+        "resolved": False,
+    }
+    _audio_alerts.append(alert)
+    _audit(claims, f"simulate_audio_alert:{kind}", broadcast_id)
+    return jsonify(alert), 201
+
+
+@app.route("/admin/audio/alerts/resolve", methods=["POST"])
+def resolve_audio_alert():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    alert_id = (request.get_json(silent=True) or {}).get("alert_id", "")
+    for a in _audio_alerts:
+        if a["id"] == alert_id:
+            a["resolved"] = True
+            return jsonify({"ok": True}), 200
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/admin/audio/tracks/add", methods=["POST"])
+def add_audio_track():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    bid = body.get("broadcast_id", "anon/live1")
+    lang = body.get("lang", "en")[:5]
+    label = body.get("label") or lang.upper()
+    if bid not in _broadcasts:
+        return jsonify({"error": "broadcast no encontrado"}), 404
+    existing = _broadcasts[bid].get("audio_tracks", [])
+    pid = 481 + len(existing)
+    track = {"id": secrets.token_hex(3), "lang": lang, "label": label, "pid": pid, "default": False}
+    _broadcasts[bid].setdefault("audio_tracks", []).append(track)
+    _audit(claims, "add_audio_track", f"{bid} {lang}")
+    return jsonify(track), 201
+
+
+@app.route("/admin/audio/tracks/remove", methods=["POST"])
+def remove_audio_track():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    bid = body.get("broadcast_id", "")
+    track_id = body.get("track_id", "")
+    if bid not in _broadcasts:
+        return jsonify({"error": "broadcast no encontrado"}), 404
+    before = len(_broadcasts[bid].get("audio_tracks", []))
+    _broadcasts[bid]["audio_tracks"] = [
+        t for t in _broadcasts[bid].get("audio_tracks", []) if t["id"] != track_id
+    ]
+    removed = before - len(_broadcasts[bid]["audio_tracks"])
+    _audit(claims, "remove_audio_track", f"{bid} {track_id}")
+    return jsonify({"ok": True, "removed": removed}), 200
+
+
+# ── ISSUE #152 — Presets ───────────────────────────────────────────────────────
+
+_BROADCAST_PRESETS = [
+    {
+        "id": "sd480",
+        "label": "SD 480p",
+        "video": {"codec": "H.264", "profile": "Main", "level": "3.0",
+                  "resolution": "854x480", "fps": 25, "kbps": 1400, "gop_frames": 50},
+        "audio": {"codec": "AAC", "channels": 2, "sample_rate": 48000, "kbps": 128},
+        "total_kbps": 1528,
+        "use_case": "Distribución SD, bajo ancho de banda",
+    },
+    {
+        "id": "hd720",
+        "label": "HD 720p",
+        "video": {"codec": "H.264", "profile": "Main", "level": "3.1",
+                  "resolution": "1280x720", "fps": 30, "kbps": 4000, "gop_frames": 30},
+        "audio": {"codec": "AAC", "channels": 2, "sample_rate": 48000, "kbps": 128},
+        "total_kbps": 4128,
+        "use_case": "Streaming HD estándar",
+    },
+    {
+        "id": "fhd1080",
+        "label": "FHD 1080p",
+        "video": {"codec": "H.264", "profile": "High", "level": "4.0",
+                  "resolution": "1920x1080", "fps": 30, "kbps": 8000, "gop_frames": 30},
+        "audio": {"codec": "AAC", "channels": 2, "sample_rate": 48000, "kbps": 192},
+        "total_kbps": 8192,
+        "use_case": "Producción broadcast calidad plena",
+    },
+    {
+        "id": "moq_ultralow",
+        "label": "MoQ Ultra-Low Latency",
+        "video": {"codec": "H.264", "profile": "Main", "level": "3.1",
+                  "resolution": "1280x720", "fps": 30, "kbps": 4000, "gop_frames": 15},
+        "audio": {"codec": "AAC", "channels": 2, "sample_rate": 48000, "kbps": 128},
+        "total_kbps": 4128,
+        "use_case": "Optimizado para MoQ <500ms glass-to-glass",
+    },
+]
+
+
+@app.route("/admin/broadcasts/presets", methods=["GET"])
+def broadcast_presets():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify(_BROADCAST_PRESETS), 200
+
+
+# ── ISSUE #150 — Create broadcast ─────────────────────────────────────────────
+
+@app.route("/admin/broadcasts/create", methods=["POST"])
+def create_broadcast():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    broadcast_id = body.get("broadcast_id", "")
+    if not broadcast_id:
+        return jsonify({"error": "broadcast_id es obligatorio"}), 400
+    if broadcast_id in _broadcasts:
+        return jsonify({"error": f"broadcast '{broadcast_id}' ya existe"}), 409
+
+    vcfg = body.get("video", {})
+    acfg = body.get("audio", {})
+
+    resolution = vcfg.get("resolution", "1280x720")
+    fps        = int(vcfg.get("fps", 30))
+    video_kbps = int(vcfg.get("kbps", 4000))
+    audio_kbps = max(AUDIO_KBPS_DEFAULT, int(acfg.get("kbps", AUDIO_KBPS_DEFAULT)))
+
+    # Construir tracks con PID MPEG-TS desde 481
+    raw_tracks = acfg.get("tracks", [{"lang": "es", "label": "Español"}])
+    audio_tracks = [
+        {"id": secrets.token_hex(3), "lang": t.get("lang", "es"),
+         "label": t.get("label", t.get("lang", "es").upper()),
+         "pid": 481 + i, "default": i == 0}
+        for i, t in enumerate(raw_tracks)
+    ]
+
+    _broadcasts[broadcast_id] = {
+        "id": broadcast_id,
+        "status": "active",
+        "status_reason": "",
+        "bitrate_kbps": video_kbps + audio_kbps,
+        "viewers": 0,
+        "uptime_s": 0,
+        "encoder": "synthetic",
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "killed": False,
+        "simulated": True,
+        "ingest_type": "synthetic",
+        "description": body.get("description", ""),
+        "video_codec": vcfg.get("codec", "H.264"),
+        "video_profile": vcfg.get("profile", "Main"),
+        "video_level": vcfg.get("level") or _h264_level(resolution, fps),
+        "video_resolution": resolution,
+        "video_fps": fps,
+        "video_kbps": video_kbps,
+        "audio_codec": acfg.get("codec", "AAC"),
+        "audio_kbps": audio_kbps,
+        "audio_channels": int(acfg.get("channels", 2)),
+        "audio_sample_rate": int(acfg.get("sample_rate", 48000)),
+        "audio_tracks": audio_tracks,
+        "lipsync_ms": 0,
+    }
+    _audit(claims, "create_broadcast", broadcast_id)
+    return jsonify(_broadcasts[broadcast_id]), 201
 
 
 # ── MÓDULO: Federación ─────────────────────────────────────────────────────────
@@ -644,6 +1011,34 @@ def monitor_source():
         "has_clock": active,
         "source": "memory",
     }), 200
+
+
+@app.route("/admin/relay/cert-hash", methods=["GET"])
+def relay_cert_hash():
+    """Devuelve el SHA-256 del cert TLS del relay para WebTransport."""
+    # Sin autenticación: solo hash público del cert, no secreto.
+    relay_web = os.environ.get("MOQ_RELAY_WEB", "http://localhost:8090")
+    try:
+        with urllib.request.urlopen(f"{relay_web}/fingerprint", timeout=2) as resp:
+            data = resp.read().decode().strip()
+            # El relay devuelve algo como "sha-256:ab12cd..." → extraer hex
+            if ":" in data:
+                data = data.split(":", 1)[1].replace(":", "").lower()
+            return jsonify({"cert_hash": data, "source": "relay"}), 200
+    except Exception:
+        pass
+    # Fallback: leer desde archivo .env.dev-cert generado por renew-dev-certs.sh
+    for env_file in ("config/relay/certs/.env.dev-cert", ".env.dev-cert", ".env"):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    if line.startswith("RELAY_CERT_SHA256="):
+                        cert_hash = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if cert_hash:
+                            return jsonify({"cert_hash": cert_hash, "source": env_file}), 200
+        except Exception:
+            continue
+    return jsonify({"cert_hash": "", "source": "none"}), 200
 
 
 @app.route("/health", methods=["GET"])
