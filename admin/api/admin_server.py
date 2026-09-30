@@ -600,6 +600,52 @@ def get_audit_log():
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 
+@app.route("/admin/monitor/source", methods=["GET"])
+def monitor_source():
+    """Verifica si el broadcast está publicando intentando fetch del catalog."""
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    broadcast_id = request.args.get("broadcast", "anon/live1")
+    relay_host = os.environ.get("MOQ_RELAY_TCP", "localhost:4444")
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["docker", "run", "--rm", "--network", "teremoqwow-dev",
+             "--network", "teremoqwow-e2e",
+             "moqdev/moq:0.12.7",
+             "--connect", f"tcp://moq-relay:4444/anon",
+             "--broadcast", broadcast_id,
+             "fetch", "catalog.json"],
+            capture_output=True, text=True, timeout=6
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                catalog = json.loads(result.stdout)
+                tracks = list(catalog.get("video", {}).get("renditions", {}).keys()) + \
+                         list(catalog.get("audio", {}).get("renditions", {}).keys())
+                return jsonify({
+                    "broadcasting": True,
+                    "broadcast": broadcast_id,
+                    "tracks": tracks,
+                    "has_clock": "clock" in catalog,
+                    "source": "docker",
+                }), 200
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Sin Docker: inferir del estado en memoria
+    bcast = _broadcasts.get(broadcast_id, {})
+    active = bcast.get("status") == "active"
+    return jsonify({
+        "broadcasting": active,
+        "broadcast": broadcast_id,
+        "tracks": ["0.avc3", "1.aac"] if active else [],
+        "has_clock": active,
+        "source": "memory",
+    }), 200
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"service": "admin-api", "status": "ok"}), 200

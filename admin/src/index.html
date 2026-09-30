@@ -90,6 +90,7 @@
     .alert-item .aname { font-weight: 600; color: var(--red); }
     iframe.grafana { width: 100%; height: 600px; border: none; border-radius: 8px;
                      background: var(--surface); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
   </style>
 </head>
 <body>
@@ -219,8 +220,14 @@ function setContent(html) { document.getElementById('content').innerHTML = html;
 
 // ── Broadcasts ───────────────────────────────────────────────────────────────
 async function loadBroadcasts() {
-  const r = await api('/admin/broadcasts');
-  const data = await r.json();
+  const [r, srcR] = await Promise.all([
+    api('/admin/broadcasts'),
+    api('/admin/monitor/source?broadcast=anon/live1'),
+  ]);
+  const data   = await r.json();
+  const source = await srcR.json();
+  const playerUrl = window.PLAYER_URL || 'http://localhost:5173';
+  const isLive = source.broadcasting;
   const rows = data.map(b => `
     <tr>
       <td><code>${b.id}</code>${b.simulated?'<span class="badge yellow" style="margin-left:4px">sim</span>':''}</td>
@@ -235,24 +242,67 @@ async function loadBroadcasts() {
           : '<button class="btn" onclick="injectBroadcast(\'' + b.id + '\', 4000)">▶ Reinyectar</button>'}
       </td>
     </tr>`).join('');
+  const pulseStyle = isLive
+    ? 'width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite'
+    : 'width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block';
+  const tracks = (source.tracks||[]).map(t=>`<code style="margin-right:6px;font-size:0.75rem">${t}</code>`).join('');
+
   setContent(`
-    <div class="grid-3">
-      <div class="card"><div class="label">Activos</div><div class="value green">${data.filter(b=>b.status==='active').length}</div></div>
-      <div class="card"><div class="label">Total viewers</div><div class="value">${data.reduce((s,b)=>s+b.viewers,0)}</div></div>
-      <div class="card"><div class="label">Bitrate total</div><div class="value">${(data.reduce((s,b)=>s+b.bitrate_kbps,0)/1000).toFixed(1)} Mbps</div></div>
-    </div>
-    <div class="section-title">Simulador de stream</div>
-    <div class="card" style="max-width:480px;margin-bottom:1rem">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem">
-        <div><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Broadcast ID</div>
-          <input id="inj-id" value="anon/live1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
-        <div><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Bitrate (kbps)</div>
-          <input id="inj-br" type="number" value="4000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:1.25rem;margin-bottom:1.25rem">
+      <!-- Player consumer -->
+      <div>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.6rem">
+          <span style="${pulseStyle}"></span>
+          <span style="font-weight:600;font-size:0.9rem;color:${isLive?'var(--green)':'var(--red)'}">
+            ${isLive?'EN VIVO':'SIN SEÑAL'}
+          </span>
+          <span style="font-size:0.75rem;color:var(--muted)">${source.broadcast}</span>
+          ${tracks}
+        </div>
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--border)">
+          <iframe src="${playerUrl}"
+            style="width:100%;height:100%;border:none"
+            allow="autoplay"
+            sandbox="allow-scripts allow-same-origin">
+          </iframe>
+          ${!isLive?`<div style="position:absolute;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted)">
+            <div style="font-size:2rem;margin-bottom:0.5rem">📡</div>
+            <div style="font-size:0.85rem">Sin señal — inyecta un stream primero</div>
+          </div>`:''}
+        </div>
+        <!-- URL pública -->
+        <div style="margin-top:0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:0.75rem;color:var(--muted)">URL para ver la señal:</span>
+          <a href="${playerUrl}" target="_blank" style="color:var(--accent);font-size:0.82rem;font-family:monospace">${playerUrl}</a>
+          <button class="btn" style="font-size:0.75rem;padding:2px 8px" onclick="navigator.clipboard.writeText('${playerUrl}').then(()=>this.textContent='✓').catch(()=>{})">Copiar</button>
+        </div>
       </div>
-      <button class="btn" style="background:rgba(76,175,80,0.15);border-color:var(--green);color:var(--green)" onclick="injectFromForm()">▶ Inyectar vídeo de prueba</button>
-      <span id="inj-status" style="margin-left:1rem;font-size:0.8rem;color:var(--muted)"></span>
+      <!-- Panel lateral: origen + inyector -->
+      <div>
+        <div class="section-title" style="margin-bottom:0.6rem">Inyectar stream</div>
+        <div class="card" style="margin-bottom:0.75rem">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.6rem">
+            <div><div style="font-size:0.72rem;color:var(--muted);margin-bottom:3px">Broadcast</div>
+              <input id="inj-id" value="anon/live1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.35rem;border-radius:4px;font-size:0.82rem"/></div>
+            <div><div style="font-size:0.72rem;color:var(--muted);margin-bottom:3px">Bitrate kbps</div>
+              <input id="inj-br" type="number" value="4000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.35rem;border-radius:4px;font-size:0.82rem"/></div>
+          </div>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn" style="flex:1;border-color:var(--green);color:var(--green)" onclick="injectFromForm()">▶ Inyectar</button>
+            <button class="btn danger" onclick="stopInject(document.getElementById('inj-id')?.value||'anon/live1')">⏹</button>
+          </div>
+          <div id="inj-status" style="margin-top:0.4rem;font-size:0.78rem;color:var(--muted)"></div>
+        </div>
+        <div class="section-title" style="margin-bottom:0.6rem">Stats</div>
+        <div class="card">
+          <div class="stat-item"><span class="stat-label">Broadcasts activos</span><span class="stat-value">${data.filter(b=>b.status==='active').length}</span></div>
+          <div class="stat-item"><span class="stat-label">Bitrate total</span><span class="stat-value">${(data.reduce((s,b)=>s+b.bitrate_kbps,0)/1000).toFixed(1)} Mbps</span></div>
+          <div class="stat-item"><span class="stat-label">Viewers</span><span class="stat-value">${data.reduce((s,b)=>s+b.viewers,0)}</span></div>
+          <div class="stat-item"><span class="stat-label">Clock MoQ</span><span class="stat-value" style="color:${source.has_clock?'var(--green)':'var(--muted)'}">${source.has_clock?'✓ presente':'—'}</span></div>
+        </div>
+      </div>
     </div>
-    <div class="section-title">Broadcasts</div>
+    <div class="section-title">Lista de broadcasts</div>
     <table><thead><tr><th>Broadcast</th><th>Estado</th><th>Bitrate</th><th>Viewers</th><th>Encoder</th><th>Acciones</th></tr></thead>
     <tbody>${rows}</tbody></table>`);
 }
@@ -529,6 +579,113 @@ async function loadAudit() {
     <div class="section-title">Log de auditoría (últimas 50 acciones)</div>
     ${log.length ? `<table><thead><tr><th>Timestamp</th><th>Actor</th><th>Rol</th><th>Acción</th><th>Detalle</th><th>IP</th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p style="color:var(--muted);font-size:0.85rem">Sin acciones registradas todavía</p>'}`);
+}
+
+// ── Monitor ───────────────────────────────────────────────────────────────────
+let _monitorInterval = null;
+
+async function loadMonitor() {
+  const relayUrl = window.MOQ_RELAY_URL || 'https://127.0.0.1:4443/anon';
+  setContent(`
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.25rem">
+      <div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem">
+          <div class="section-title" style="margin:0">Consumer — stream en vivo</div>
+          <select id="mon-broadcast" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.5rem;border-radius:4px;font-size:0.82rem">
+            <option value="anon/live1">anon/live1</option>
+          </select>
+          <button class="btn" onclick="refreshMonitor()">⟳ Reconectar</button>
+        </div>
+        <div style="background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;position:relative;border:1px solid var(--border)">
+          <iframe id="mon-player"
+            src="${window.PLAYER_URL || 'http://localhost:5173'}"
+            style="width:100%;height:100%;border:none"
+            allow="autoplay; camera; microphone"
+            sandbox="allow-scripts allow-same-origin allow-forms">
+          </iframe>
+          <div id="mon-overlay" style="position:absolute;inset:0;background:rgba(0,0,0,0.7);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff">
+            <div style="font-size:2rem;margin-bottom:0.5rem">📡</div>
+            <div id="mon-status-text" style="font-size:0.9rem;color:var(--muted)">Verificando origen...</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="section-title" style="margin-bottom:0.75rem">Estado del origen</div>
+        <div class="card" id="mon-source-card">
+          <div class="loading" style="padding:1rem 0">Consultando relay...</div>
+        </div>
+        <div class="section-title" style="margin:1rem 0 0.75rem">Relay</div>
+        <div class="card">
+          <div class="flag-row" style="border:none;padding:0.4rem 0">
+            <span style="font-size:0.82rem;color:var(--muted)">MoQ Relay</span>
+            <a href="http://localhost:8090" target="_blank" style="color:var(--accent);font-size:0.82rem">localhost:8090 ↗</a>
+          </div>
+          <div class="flag-row" style="border:none;padding:0.4rem 0">
+            <span style="font-size:0.82rem;color:var(--muted)">Player</span>
+            <a href="http://localhost:5173" target="_blank" style="color:var(--accent);font-size:0.82rem">localhost:5173 ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>`);
+  startMonitorPolling();
+}
+
+async function startMonitorPolling() {
+  if (_monitorInterval) clearInterval(_monitorInterval);
+  await pollMonitorSource();
+  _monitorInterval = setInterval(pollMonitorSource, 3000);
+}
+
+async function pollMonitorSource() {
+  const broadcast = document.getElementById('mon-broadcast')?.value || 'anon/live1';
+  try {
+    const r = await api(`/admin/monitor/source?broadcast=${encodeURIComponent(broadcast)}`);
+    const d = await r.json();
+    const card = document.getElementById('mon-source-card');
+    const overlay = document.getElementById('mon-overlay');
+    const statusTxt = document.getElementById('mon-status-text');
+    if (!card) return;
+
+    if (d.broadcasting) {
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+          <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite"></span>
+          <span style="color:var(--green);font-weight:600">TRANSMITIENDO</span>
+        </div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem">Broadcast: <code>${d.broadcast}</code></div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Tracks activos:</div>
+        ${d.tracks.map(t=>`<div style="font-size:0.78rem;padding:2px 0;color:var(--text)">· <code>${t}</code></div>`).join('')}
+        <div style="margin-top:0.5rem;font-size:0.75rem;color:var(--muted)">Clock: ${d.has_clock?'✓ presente':'—'} · Fuente: ${d.source}</div>`;
+      if (overlay) overlay.style.display = 'none';
+    } else {
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+          <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block"></span>
+          <span style="color:var(--red);font-weight:600">SIN SEÑAL</span>
+        </div>
+        <div style="font-size:0.82rem;color:var(--muted)">No hay broadcast activo en <code>${d.broadcast}</code></div>
+        <div style="margin-top:0.75rem">
+          <button class="btn" style="font-size:0.8rem" onclick="injectBroadcast('${d.broadcast}', 4000)">▶ Inyectar stream de prueba</button>
+        </div>`;
+      if (overlay) { overlay.style.display = 'flex'; if(statusTxt) statusTxt.textContent = 'Sin señal — inyecta un stream primero'; }
+    }
+  } catch(e) {
+    const card = document.getElementById('mon-source-card');
+    if (card) card.innerHTML = '<div style="color:var(--red);font-size:0.82rem">Error consultando el relay</div>';
+  }
+}
+
+function refreshMonitor() {
+  const iframe = document.getElementById('mon-player');
+  if (iframe) iframe.src = iframe.src;
+  pollMonitorSource();
+}
+
+// Limpiar interval al cambiar de página
+const _origNavigate = navigate;
+function navigate(el) {
+  if (_monitorInterval) { clearInterval(_monitorInterval); _monitorInterval = null; }
+  _origNavigate(el);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
