@@ -1,0 +1,1247 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>teremoqwow Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f13; --surface: #1a1a24; --border: #2a2a3a;
+      --text: #e0e0f0; --muted: #888; --accent: #4fc3f7;
+      --green: #4caf50; --red: #ef5350; --yellow: #ffc107;
+      --sidebar-w: 220px;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+    #sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border);
+               display: flex; flex-direction: column; flex-shrink: 0; }
+    #sidebar header { padding: 1.25rem 1rem; border-bottom: 1px solid var(--border); }
+    #sidebar header h1 { font-size: 1rem; color: var(--accent); }
+    #sidebar header p  { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    #sidebar nav { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+    .nav-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem;
+                font-size: 0.85rem; cursor: pointer; border-left: 3px solid transparent;
+                transition: background 0.15s; }
+    .nav-item:hover { background: rgba(79,195,247,0.08); }
+    .nav-item.active { border-left-color: var(--accent); background: rgba(79,195,247,0.12); color: var(--accent); }
+    #sidebar footer { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--muted); }
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #topbar { height: 52px; background: var(--surface); border-bottom: 1px solid var(--border);
+              display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; flex-shrink: 0; }
+    #topbar .title { font-size: 1rem; font-weight: 600; }
+    #topbar .user  { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 0.75rem; }
+    #topbar .logout-btn { background: none; border: 1px solid var(--border); color: var(--text);
+                          padding: 0.3rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    #topbar .logout-btn:hover { border-color: var(--red); color: var(--red); }
+    #content { flex: 1; overflow-y: auto; padding: 1.5rem; }
+    /* Login */
+    #login-screen { position: fixed; inset: 0; background: var(--bg);
+                    display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .login-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                 padding: 2rem; width: 360px; }
+    .login-box h2 { margin-bottom: 1.5rem; color: var(--accent); }
+    .form-field { margin-bottom: 1rem; }
+    .form-field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    .form-field input { width: 100%; background: var(--bg); border: 1px solid var(--border);
+                        color: var(--text); padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }
+    .form-field input:focus { outline: none; border-color: var(--accent); }
+    .btn-primary { width: 100%; background: var(--accent); color: #000; font-weight: 600;
+                   border: none; padding: 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+    .btn-primary:hover { opacity: 0.9; }
+    .error-msg { color: var(--red); font-size: 0.8rem; margin-top: 0.5rem; }
+    /* Cards / grid */
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+    .card .label { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem; }
+    .card .value { font-size: 1.5rem; font-weight: 700; }
+    .card .value.green { color: var(--green); }
+    .card .value.red   { color: var(--red); }
+    .card .value.yellow { color: var(--yellow); }
+    /* Table */
+    .section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight: 600; }
+    .badge.green  { background: rgba(76,175,80,0.2); color: var(--green); }
+    .badge.red    { background: rgba(239,83,80,0.2); color: var(--red); }
+    .badge.yellow { background: rgba(255,193,7,0.2); color: var(--yellow); }
+    .badge.blue   { background: rgba(79,195,247,0.2); color: var(--accent); }
+    /* Buttons */
+    .btn { padding: 0.3rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+           border: 1px solid var(--border); background: none; color: var(--text); }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.danger { border-color: var(--red); color: var(--red); }
+    .btn.danger:hover { background: rgba(239,83,80,0.1); }
+    .flag-row { display: flex; align-items: center; justify-content: space-between;
+                padding: 0.6rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; background: var(--border); border-radius: 20px; cursor: pointer; transition: 0.2s; }
+    .slider::before { content:""; position:absolute; height:14px; width:14px; left:3px; bottom:3px;
+                      background:#fff; border-radius:50%; transition:0.2s; }
+    input:checked + .slider { background: var(--green); }
+    input:checked + .slider::before { transform: translateX(16px); }
+    .loading { color: var(--muted); font-size: 0.85rem; padding: 2rem 0; text-align: center; }
+    .alert-item { background: rgba(239,83,80,0.1); border: 1px solid rgba(239,83,80,0.3);
+                  border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; font-size: 0.82rem; }
+    .alert-item .aname { font-weight: 600; color: var(--red); }
+    iframe.grafana { width: 100%; height: 600px; border: none; border-radius: 8px;
+                     background: var(--surface); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  </style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="login-screen">
+  <div class="login-box">
+    <h2>⚡ teremoqwow Admin</h2>
+    <div class="form-field">
+      <label>Email</label>
+      <input id="login-email" type="email" value="admin@teremoqwow.dev" />
+    </div>
+    <div class="form-field">
+      <label>Password</label>
+      <input id="login-password" type="password" value="dev-secret" />
+    </div>
+    <button class="btn-primary" onclick="login()">Entrar</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <header>
+    <h1>⚡ teremoqwow</h1>
+    <p>Admin panel</p>
+  </header>
+  <nav id="nav">
+    <div class="nav-item active" data-page="broadcasts" onclick="navigate(this)">📡 Broadcasts</div>
+    <div class="nav-item" data-page="federation" onclick="navigate(this)">🌐 Federación</div>
+    <div class="nav-item" data-page="drm" onclick="navigate(this)">🔒 DRM / Rights</div>
+    <div class="nav-item" data-page="monetization" onclick="navigate(this)">💳 Monetización</div>
+    <div class="nav-item" data-page="qos" onclick="navigate(this)">📊 QoS</div>
+    <div class="nav-item" data-page="security" onclick="navigate(this)">🛡️ Seguridad</div>
+    <div class="nav-item" data-page="flags" onclick="navigate(this)">🚩 Feature Flags</div>
+    <div class="nav-item" data-page="audit" onclick="navigate(this)">📋 Auditoría</div>
+  </nav>
+  <footer id="sidebar-user">—</footer>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="topbar">
+    <span class="title" id="page-title">Broadcasts</span>
+    <span class="user">
+      <span id="user-email"></span>
+      <button class="logout-btn" onclick="logout()">Salir</button>
+    </span>
+  </div>
+  <div id="content"><div class="loading">Cargando...</div></div>
+</div>
+
+<script>
+const API = window.ADMIN_API_URL || 'http://localhost:9004';
+let token = localStorage.getItem('admin_token') || '';
+let currentPage = 'broadcasts';
+
+// Leer cert hash del relay al arrancar (sin auth, endpoint público)
+(async () => {
+  try {
+    const r = await fetch(`${API}/admin/relay/cert-hash`);
+    if (r.ok) {
+      const d = await r.json();
+      if (d.cert_hash) window.MOQ_CERT_HASH = d.cert_hash;
+    }
+  } catch (_) {}
+})();
+
+const pages = {
+  broadcasts:   { title: 'Broadcasts',   load: loadBroadcasts },
+  federation:   { title: 'Federación',   load: loadFederation },
+  drm:          { title: 'DRM / Rights', load: loadDRM },
+  monetization: { title: 'Monetización', load: loadMonetization },
+  qos:          { title: 'QoS',          load: loadQoS },
+  security:     { title: 'Seguridad',    load: loadSecurity },
+  flags:        { title: 'Feature Flags',load: loadFlags },
+  audit:        { title: 'Auditoría',    load: loadAudit },
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(`${API}${path}`, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+  });
+  if (r.status === 401) { logout(); throw new Error('401'); }
+  return r;
+}
+
+async function login() {
+  const email = document.getElementById('login-email').value;
+  const pass  = document.getElementById('login-password').value;
+  const authUrl = window.AUTH_URL || 'http://localhost:9002';
+  try {
+    const r = await fetch(`${authUrl}/auth/login`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: pass}),
+    });
+    if (!r.ok) { document.getElementById('login-error').textContent = 'Credenciales inválidas'; return; }
+    const data = await r.json();
+    // Verificar rol admin
+    const payload = JSON.parse(atob(data.access_token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    if (!['admin','superadmin','operator','analyst'].includes(payload.role)) {
+      document.getElementById('login-error').textContent = 'Acceso denegado: rol insuficiente';
+      return;
+    }
+    token = data.access_token;
+    localStorage.setItem('admin_token', token);
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('user-email').textContent = payload.email;
+    document.getElementById('sidebar-user').textContent = `${payload.role} · ${payload.email}`;
+    loadPage(currentPage);
+  } catch(e) {
+    document.getElementById('login-error').textContent = 'Error de conexión con Auth API';
+  }
+}
+
+function logout() {
+  token = ''; localStorage.removeItem('admin_token');
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-error').textContent = '';
+}
+
+function navigate(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  el.classList.add('active');
+  const page = el.dataset.page;
+  currentPage = page;
+  document.getElementById('page-title').textContent = pages[page].title;
+  loadPage(page);
+}
+
+function loadPage(page) {
+  document.getElementById('content').innerHTML = '<div class="loading">Cargando...</div>';
+  pages[page].load();
+}
+
+function setContent(html) { document.getElementById('content').innerHTML = html; }
+
+// ── Broadcasts ───────────────────────────────────────────────────────────────
+// ── Helpers de señal ──────────────────────────────────────────────────────────
+
+function _signalTileId(broadcastId) { return 'tile-' + broadcastId.replace(/\W/g,'_'); }
+
+function _renderSignalTile(b, audioInfo, ls, playerUrl) {
+  const tid  = _signalTileId(b.id);
+  const cert = window.MOQ_CERT_HASH ? `&cert=${encodeURIComponent(window.MOQ_CERT_HASH)}` : '';
+  const viewUrl = `${playerUrl}?embed=1&broadcast=${encodeURIComponent(b.id)}${cert}`;
+  const lsMs = ls?.lipsync_ms ?? 0;
+  const lsOk = Math.abs(lsMs) < 40;
+  const lsColor = lsOk ? 'var(--green)' : Math.abs(lsMs) < 80 ? 'var(--yellow)' : 'var(--red)';
+  const tracks = (audioInfo?.tracks || b.audio_tracks || [{id:'t0',lang:'es',label:'Español'}]);
+  const trackBadges = tracks.map(t =>
+    `<span data-tid="${t.id}" data-bid="${b.id}"
+      style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.25);
+             border-radius:3px;padding:1px 5px;font-size:0.65rem;color:var(--accent);cursor:pointer"
+      title="Click para eliminar" onclick="removeAudioTrack('${b.id}','${t.id}')">${t.label}</span>`
+  ).join('');
+
+  const videoKbps = (b.video_kbps || Math.round(b.bitrate_kbps * 0.94));
+  const audioKbps = audioInfo?.kbps || b.audio_kbps || (b.bitrate_kbps - videoKbps);
+
+  return `
+  <div id="${tid}" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column">
+    <!-- ── Header ── -->
+    <div style="padding:0.45rem 0.8rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.5rem;flex-shrink:0;background:rgba(0,0,0,0.25)">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite;flex-shrink:0"></span>
+      <code style="font-size:0.82rem;color:#fff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.id}</code>
+      ${b.simulated ? '<span class="badge yellow">sim</span>' : ''}
+      <span class="badge green" style="font-size:0.65rem">${b.status}</span>
+      <a href="${viewUrl}" target="_blank"
+        style="background:rgba(79,195,247,0.14);border:1px solid rgba(79,195,247,0.3);color:var(--accent);
+               padding:2px 10px;border-radius:4px;font-size:0.72rem;text-decoration:none;white-space:nowrap">▶ Ver</a>
+      <button onclick="stopInject('${b.id}')"
+        style="background:rgba(239,83,80,0.12);border:1px solid rgba(239,83,80,0.3);color:var(--red);
+               padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.72rem">⏹</button>
+      <button class="btn danger" style="font-size:0.7rem;padding:2px 8px" onclick="killBroadcast('${b.id}')">Kill</button>
+      <button onclick="navigator.clipboard.writeText('${viewUrl}').then(e=>this.textContent='✓').catch(()=>{})"
+        style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;cursor:pointer;font-size:0.7rem" title="Copiar URL">📋</button>
+    </div>
+    <!-- ── Body 3 paneles ── -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;min-height:200px;flex:1">
+
+      <!-- 📹 VIDEO -->
+      <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0">
+        <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">📹 Vídeo</div>
+        <canvas id="cv-vid-${tid}" style="flex:1;width:100%;display:block;min-height:120px"></canvas>
+        <div style="padding:0.35rem 0.6rem;font-size:0.7rem;line-height:1.6;border-top:1px solid rgba(255,255,255,0.06)">
+          <div style="color:var(--text);font-weight:500">${b.video_resolution||'1280×720'} · ${b.video_fps||30} fps</div>
+          <div style="color:var(--muted)">${b.video_codec||'H.264'} ${b.video_profile||'Main'}</div>
+          <div style="color:var(--accent)">${(videoKbps/1000).toFixed(1)} Mbps vídeo</div>
+        </div>
+      </div>
+
+      <!-- 🔊 AUDIO -->
+      <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0">
+        <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">🔊 Audio</div>
+        <canvas id="cv-aud-${tid}" style="flex:1;width:100%;display:block;min-height:120px"></canvas>
+        <div style="padding:0.35rem 0.6rem;font-size:0.7rem;line-height:1.6;border-top:1px solid rgba(255,255,255,0.06)">
+          <div style="color:var(--text);font-weight:500">${audioInfo?.codec||b.audio_codec||'AAC'} · ${audioKbps} kbps</div>
+          <div style="color:var(--muted)">${audioInfo?.channels||b.audio_channels||2}ch · ${((audioInfo?.sample_rate||b.audio_sample_rate||48000)/1000).toFixed(0)} kHz</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;align-items:center">
+            ${trackBadges}
+            <button onclick="addAudioTrackUI('${b.id}')"
+              style="background:none;border:1px dashed rgba(255,255,255,0.2);color:var(--muted);padding:1px 5px;border-radius:3px;cursor:pointer;font-size:0.62rem;line-height:1.3">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 📊 DATA -->
+      <div style="display:flex;flex-direction:column;min-width:0">
+        <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">📊 Data</div>
+        <div style="padding:0.5rem 0.7rem;flex:1;font-size:0.72rem;line-height:1.85">
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Total bitrate</span><span style="color:var(--text)">${(b.bitrate_kbps/1000).toFixed(1)} Mbps</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Viewers</span><span style="color:var(--text)">${b.viewers}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Lip-sync</span><span style="color:${lsColor}">${lsMs >= 0 ? '+' : ''}${lsMs} ms ${lsOk ? '✓' : '⚠'}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Latencia</span><span style="color:var(--green)">&lt;100 ms</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Encoder</span><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px" title="${b.encoder||'—'}">${b.encoder||'—'}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Iniciado</span><span style="color:var(--muted);font-size:0.65rem">${b.started_at?.slice(11,19)||'—'}</span></div>
+        </div>
+        <!-- Alerta audio simulada -->
+        <div style="padding:0.35rem 0.6rem;border-top:1px solid rgba(255,255,255,0.06)">
+          <div style="font-size:0.62rem;color:var(--muted);margin-bottom:3px">Simular alerta audio</div>
+          <div style="display:flex;gap:3px">
+            <button onclick="simAudioAlert('${b.id}','silence')" class="btn" style="flex:1;font-size:0.62rem;padding:2px">Silencio</button>
+            <button onclick="simAudioAlert('${b.id}','clipping')" class="btn" style="flex:1;font-size:0.62rem;padding:2px">Clip</button>
+            <button onclick="simAudioAlert('${b.id}','desync')" class="btn" style="flex:1;font-size:0.62rem;padding:2px">Desync</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>`;
+}
+
+async function loadBroadcasts() {
+  const [r, srcR, audioR, lsR, alertsR] = await Promise.all([
+    api('/admin/broadcasts'),
+    api('/admin/monitor/source?broadcast=anon/live1'),
+    api('/admin/audio/tracks'),
+    api('/admin/audio/lipsync'),
+    api('/admin/audio/alerts'),
+  ]);
+  const data      = await r.json();
+  const source    = await srcR.json();
+  const audioList = await audioR.json();
+  const lsList    = await lsR.json();
+  const auAlerts  = await alertsR.json();
+
+  // Indexar por broadcast_id
+  const audioMap = Object.fromEntries(audioList.map(a => [a.broadcast_id, a]));
+  const lsMap    = Object.fromEntries(lsList.map(l => [l.broadcast_id, l]));
+
+  const playerUrl = window.PLAYER_URL || 'http://localhost:5173';
+  const active = data.filter(b => b.status === 'active');
+  const cols   = active.length <= 1 ? 1 : active.length <= 2 ? 2 : 2;
+
+  const tiles = active.length
+    ? active.map(b => _renderSignalTile(b, audioMap[b.id], lsMap[b.id], playerUrl)).join('')
+    : `<div style="background:var(--surface);border:1px dashed var(--border);border-radius:10px;padding:3rem;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);grid-column:1/-1">
+        <div style="font-size:2.5rem;margin-bottom:0.75rem">📡</div>
+        <div style="font-size:0.9rem">Sin señales activas</div>
+        <div style="font-size:0.78rem;margin-top:0.25rem">Usa el panel de inyección para iniciar un stream</div>
+       </div>`;
+
+  const alertHtml = auAlerts.length
+    ? auAlerts.map(a => `
+        <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-bottom:1px solid var(--border)">
+          <span class="badge ${a.kind==='silence'?'red':a.kind==='clipping'?'yellow':'blue'}">${a.kind}</span>
+          <code style="font-size:0.75rem;flex:1">${a.broadcast_id}</code>
+          <span style="font-size:0.7rem;color:var(--muted)">${a.ts?.slice(11,19)||''}</span>
+          ${a.simulated ? '<span class="badge yellow" style="font-size:0.62rem">sim</span>' : ''}
+          <button onclick="resolveAudioAlert('${a.id}')" class="btn" style="font-size:0.7rem;padding:2px 7px">Resolver</button>
+        </div>`).join('')
+    : '<p style="color:var(--muted);font-size:0.82rem">Sin alertas activas</p>';
+
+  setContent(`
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:1.25rem;align-items:start">
+
+      <!-- Izquierda: señales -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+          <div class="section-title" style="margin:0">Señales activas (${active.length})</div>
+          <span style="font-size:0.72rem;color:var(--muted)">${cols === 1?'1 columna':'2 columnas'} · vídeo · audio · data</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:0.75rem;margin-bottom:1.25rem">
+          ${tiles}
+        </div>
+
+        <!-- Alertas audio -->
+        <div class="section-title" style="margin-bottom:0.5rem">Alertas de audio</div>
+        <div class="card" style="padding:0.5rem 0.75rem">${alertHtml}</div>
+      </div>
+
+      <!-- Derecha: controles + resumen -->
+      <div style="display:flex;flex-direction:column;gap:0.75rem">
+
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
+            <div class="section-title" style="margin:0">Nuevo canal</div>
+            <div style="display:flex;gap:4px">
+              <button id="mode-syn" onclick="setInjectMode('synthetic')"
+                style="font-size:0.7rem;padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:#000">Sintético</button>
+              <button id="mode-real" onclick="setInjectMode('real')"
+                style="font-size:0.7rem;padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:none;color:var(--muted)">Real</button>
+            </div>
+          </div>
+          <div class="card" style="padding:0.75rem">
+
+            <!-- ID -->
+            <div style="margin-bottom:0.5rem">
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:2px">Broadcast ID</div>
+              <input id="inj-id" value="anon/live2" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.5rem;border-radius:4px;font-size:0.8rem"/>
+            </div>
+
+            <!-- Presets vídeo -->
+            <div style="margin-bottom:0.5rem">
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">Preset</div>
+              <div id="preset-btns" style="display:flex;gap:3px;flex-wrap:wrap">
+                <span style="font-size:0.7rem;color:var(--muted)">Cargando...</span>
+              </div>
+            </div>
+
+            <!-- Vídeo -->
+            <details style="margin-bottom:0.4rem">
+              <summary style="font-size:0.72rem;color:var(--muted);cursor:pointer;margin-bottom:4px">📹 Vídeo</summary>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px">
+                <div><div style="font-size:0.65rem;color:var(--muted)">Resolución</div>
+                  <input id="v-res" value="1280x720" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+                <div><div style="font-size:0.65rem;color:var(--muted)">FPS</div>
+                  <input id="v-fps" type="number" value="30" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+                <div><div style="font-size:0.65rem;color:var(--muted)">Bitrate vídeo (kbps)</div>
+                  <input id="v-kbps" type="number" value="4000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+                <div><div style="font-size:0.65rem;color:var(--muted)">GOP frames</div>
+                  <input id="v-gop" type="number" value="30" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+              </div>
+            </details>
+
+            <!-- Audio -->
+            <details style="margin-bottom:0.4rem">
+              <summary style="font-size:0.72rem;color:var(--muted);cursor:pointer;margin-bottom:4px">🔊 Audio</summary>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px">
+                <div><div style="font-size:0.65rem;color:var(--muted)">Bitrate audio (kbps)</div>
+                  <input id="a-kbps" type="number" value="128" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+                <div><div style="font-size:0.65rem;color:var(--muted)">Canales</div>
+                  <select id="a-ch" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem">
+                    <option value="2">Estéreo (2)</option><option value="1">Mono (1)</option><option value="6">5.1 (6)</option>
+                  </select></div>
+              </div>
+              <div style="margin-top:4px">
+                <div style="font-size:0.65rem;color:var(--muted);margin-bottom:2px">Pistas de idioma</div>
+                <div id="inj-tracks" style="display:flex;flex-wrap:wrap;gap:3px;align-items:center">
+                  <span class="inj-track-badge" data-lang="es" data-label="Español"
+                    style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.25);border-radius:3px;padding:1px 5px;font-size:0.65rem;color:var(--accent);cursor:pointer"
+                    onclick="removeInjTrack(this)">Español ×</span>
+                  <button onclick="addInjTrack()"
+                    style="background:none;border:1px dashed rgba(255,255,255,0.2);color:var(--muted);padding:1px 5px;border-radius:3px;cursor:pointer;font-size:0.62rem">+</button>
+                </div>
+              </div>
+            </details>
+
+            <!-- SRT (solo modo real) -->
+            <div id="srt-section" style="display:none;margin-bottom:0.5rem">
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">📡 Fuente de ingesta</div>
+              <div style="display:flex;gap:3px;margin-bottom:6px">
+                <button id="src-testsrc" onclick="setIngestType('testsrc2')"
+                  style="flex:1;font-size:0.65rem;padding:2px;border-radius:3px;cursor:pointer;border:1px solid var(--accent);background:rgba(79,195,247,0.15);color:var(--accent)">Testsrc2</button>
+                <button id="src-push" onclick="setIngestType('srt_push')"
+                  style="flex:1;font-size:0.65rem;padding:2px;border-radius:3px;cursor:pointer;border:1px solid var(--border);background:none;color:var(--muted)">SRT Push</button>
+                <button id="src-pull" onclick="setIngestType('srt_pull')"
+                  style="flex:1;font-size:0.65rem;padding:2px;border-radius:3px;cursor:pointer;border:1px solid var(--border);background:none;color:var(--muted)">SRT Pull</button>
+              </div>
+              <!-- Campos SRT comunes -->
+              <div id="srt-common" style="display:none;margin-bottom:4px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                  <div><div style="font-size:0.65rem;color:var(--muted)">Puerto SRT</div>
+                    <input id="srt-port" type="number" value="9998" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+                  <div><div style="font-size:0.65rem;color:var(--muted)">Latencia</div>
+                    <select id="srt-lat" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem">
+                      <option value="80">LAN (80ms)</option>
+                      <option value="150">Nacional (150ms)</option>
+                      <option value="300" selected>Internacional (300ms)</option>
+                    </select></div>
+                </div>
+                <div style="margin-top:4px"><div style="font-size:0.65rem;color:var(--muted)">Passphrase (vacío = sin cifrado)</div>
+                  <input id="srt-pass" type="password" placeholder="mínimo 10 chars" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/></div>
+              </div>
+              <!-- Solo PULL: host encoder -->
+              <div id="srt-pull-host" style="display:none;margin-bottom:4px">
+                <div style="font-size:0.65rem;color:var(--muted)">Host encoder</div>
+                <input id="srt-host" placeholder="192.168.1.50" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-size:0.75rem"/>
+              </div>
+              <!-- Solo PUSH: endpoint para compartir -->
+              <div id="srt-push-ep" style="display:none;margin-top:4px;padding:5px 7px;background:rgba(79,195,247,0.06);border:1px solid rgba(79,195,247,0.2);border-radius:4px">
+                <div style="font-size:0.62rem;color:var(--muted);margin-bottom:2px">Comparte con tu encoder:</div>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <code id="srt-ep-url" style="font-size:0.65rem;color:var(--accent);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></code>
+                  <button onclick="navigator.clipboard.writeText(document.getElementById('srt-ep-url').textContent).then(()=>this.textContent='✓')"
+                    style="background:none;border:1px solid var(--border);color:var(--muted);padding:1px 5px;border-radius:3px;cursor:pointer;font-size:0.65rem">📋</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botones acción -->
+            <div style="display:flex;gap:0.4rem;margin-top:0.5rem">
+              <button id="btn-synthetic" onclick="createSynthetic()"
+                style="flex:1;background:rgba(79,195,247,0.15);border:1px solid var(--accent);color:var(--accent);padding:0.35rem;border-radius:4px;cursor:pointer;font-size:0.78rem">▶ Crear sintético</button>
+              <button id="btn-real" onclick="injectReal()" style="display:none;
+                flex:1;background:rgba(76,175,80,0.15);border:1px solid var(--green);color:var(--green);padding:0.35rem;border-radius:4px;cursor:pointer;font-size:0.78rem">🚀 Inyectar real</button>
+            </div>
+            <div id="inj-status" style="margin-top:0.4rem;font-size:0.75rem;color:var(--muted)"></div>
+
+            <!-- Comando generado -->
+            <div id="ffmpeg-block" style="display:none;margin-top:0.6rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+                <span style="font-size:0.65rem;color:var(--muted)">Comando generado</span>
+                <button onclick="navigator.clipboard.writeText(document.getElementById('ffmpeg-cmd').textContent).then(()=>this.textContent='✓')"
+                  style="background:none;border:1px solid var(--border);color:var(--muted);padding:1px 6px;border-radius:3px;cursor:pointer;font-size:0.65rem">📋 Copiar</button>
+              </div>
+              <pre id="ffmpeg-cmd" style="background:#0a0a14;border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.62rem;overflow-x:auto;white-space:pre;color:#a0d8ef;margin:0;max-height:120px;overflow-y:auto"></pre>
+            </div>
+
+          </div>
+        </div>
+
+        <div>
+          <div class="section-title" style="margin-bottom:0.5rem">Resumen</div>
+          <div class="card">
+            <div class="stat-item"><span class="stat-label">Señales activas</span><span class="stat-value green">${active.length}</span></div>
+            <div class="stat-item"><span class="stat-label">Bitrate total</span><span class="stat-value">${(data.reduce((s,b)=>s+b.bitrate_kbps,0)/1000).toFixed(1)} Mbps</span></div>
+            <div class="stat-item"><span class="stat-label">Viewers totales</span><span class="stat-value">${data.reduce((s,b)=>s+b.viewers,0)}</span></div>
+            <div class="stat-item"><span class="stat-label">Fuente relay</span><span class="stat-value" style="color:${source.broadcasting?'var(--green)':'var(--red)'}">${source.broadcasting?'🟢 LIVE':'🔴 OFF'}</span></div>
+            <div class="stat-item"><span class="stat-label">Alertas audio</span><span class="stat-value ${auAlerts.length?'yellow':'green'}">${auAlerts.length}</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-title" style="margin-bottom:0.5rem">Todos los broadcasts</div>
+          <div style="font-size:0.78rem">
+            ${data.map(b => `
+              <div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0;border-bottom:1px solid var(--border)">
+                <span class="badge ${b.status==='active'?'green':b.status==='stopped'?'yellow':'red'}" style="font-size:0.62rem">${b.status}</span>
+                <code style="font-size:0.72rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.id}</code>
+                <span style="color:var(--muted);font-size:0.7rem">${(b.bitrate_kbps/1000).toFixed(1)}M</span>
+                ${b.status!=='active'?`<button class="btn" style="font-size:0.65rem;padding:1px 6px" onclick="injectBroadcast('${b.id}',4000)">▶</button>`:''}
+              </div>`).join('')}
+          </div>
+        </div>
+
+      </div>
+    </div>`);
+
+  loadPresets();
+  requestAnimationFrame(() => _startSignalAnimations(active));
+}
+
+// ── Animaciones de señal ───────────────────────────────────────────────────────
+
+let _animFrames = [];
+function _startSignalAnimations(broadcasts) {
+  _animFrames.forEach(id => cancelAnimationFrame(id));
+  _animFrames = [];
+  broadcasts.forEach(b => _animateTile(b));
+}
+
+function _animateTile(b) {
+  const tid = _signalTileId(b.id);
+
+  // ── VIDEO canvas: waveform de vídeo ──────────────────────────────────────
+  const cvv = document.getElementById('cv-vid-' + tid);
+  if (cvv) {
+    const ctx = cvv.getContext('2d');
+    const W = cvv.offsetWidth || 200, H = cvv.offsetHeight || 120;
+    cvv.width = W; cvv.height = H;
+    const smpte = ['#C0C0C0','#C0C000','#00C0C0','#00C000','#C000C0','#C00000','#0000C0'];
+    const bw = W / smpte.length;
+    let vPhase = 0;
+    const vAmps = Array.from({length:48}, () => 0.4 + Math.random() * 0.6);
+    function drawVideo() {
+      ctx.clearRect(0, 0, W, H);
+      // Fondo SMPTE
+      smpte.forEach((c, i) => { ctx.fillStyle = c + '55'; ctx.fillRect(i*bw, 0, bw, H); });
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
+      // Waveform
+      const cy = H * 0.48, amp = H * 0.30;
+      ctx.beginPath(); ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.8;
+      for (let i = 0; i < 48; i++) {
+        const x = (i / 47) * W;
+        const y = cy + Math.sin((i/47)*Math.PI*5 + vPhase) * amp * (vAmps[i] + (Math.random()-.5)*.05);
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      vPhase += 0.055;
+      _animFrames.push(requestAnimationFrame(drawVideo));
+    }
+    drawVideo();
+  }
+
+  // ── AUDIO canvas: VU meters ───────────────────────────────────────────────
+  const cva = document.getElementById('cv-aud-' + tid);
+  if (cva) {
+    const ctx = cva.getContext('2d');
+    const W = cva.offsetWidth || 200, H = cva.offsetHeight || 120;
+    cva.width = W; cva.height = H;
+    // Estado del VU: nivel [0..1], peak, decay
+    let vuL = 0.75, vuR = 0.68, pkL = 0.75, pkR = 0.68;
+    const PKD = 0.008; // decay de peak por frame
+    function drawAudio() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+
+      // Simular fluctuación de nivel con tendencia basada en bitrate
+      const base = Math.min(0.95, 0.5 + (b.audio_kbps || 128) / 512);
+      vuL = Math.max(0.05, Math.min(0.98, vuL + (Math.random()-.42)*0.12 + (base-vuL)*0.06));
+      vuR = Math.max(0.05, Math.min(0.98, vuR + (Math.random()-.42)*0.12 + (base-vuR)*0.06));
+      pkL = Math.max(vuL, pkL - PKD);
+      pkR = Math.max(vuR, pkR - PKD);
+
+      const mW = 22, gap = 6, barsTotal = 2*mW + gap;
+      const ox = (W - barsTotal) / 2;
+      const barH = H * 0.72;
+      const barY = H * 0.06;
+
+      [['L', ox, vuL, pkL], ['R', ox+mW+gap, vuR, pkR]].forEach(([label, x, lv, pk]) => {
+        // Fondo barra
+        ctx.fillStyle = '#1a1a2e'; ctx.fillRect(x, barY, mW, barH);
+        // Segmentos coloreados de abajo a arriba
+        const segs = 20;
+        const filledSegs = Math.round(lv * segs);
+        for (let s = 0; s < segs; s++) {
+          const sy = barY + barH - (s+1) * (barH/segs);
+          const sh = barH/segs - 1;
+          const pct = s / segs;
+          ctx.fillStyle = s >= filledSegs ? '#1a2a1a'
+            : pct < 0.6 ? '#4caf50'
+            : pct < 0.8 ? '#ffc107'
+            : '#ef5350';
+          ctx.fillRect(x+1, sy, mW-2, sh);
+        }
+        // Peak hold
+        const py = barY + barH - pk*barH - 2;
+        ctx.fillStyle = '#fff'; ctx.fillRect(x, py, mW, 2);
+        // Label
+        ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(label, x + mW/2, barY + barH + 11);
+      });
+
+      // LUFS simulado
+      const lufs = -23 + (vuL + vuR - 1.0) * 8;
+      const dbfs = -6 + (Math.max(pkL, pkR) - 0.8) * 18;
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`${lufs.toFixed(1)} LUFS`, W/2, H*0.94);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillText(`pico ${dbfs.toFixed(1)} dBFS`, W/2, H*0.86);
+
+      _animFrames.push(requestAnimationFrame(drawAudio));
+    }
+    drawAudio();
+  }
+}
+
+async function addAudioTrackUI(broadcastId) {
+  const lang  = prompt('Código de idioma (ej: en, fr, pt):', 'en');
+  if (!lang) return;
+  const label = prompt('Etiqueta (ej: English):', lang.toUpperCase()) || lang.toUpperCase();
+  await api('/admin/audio/tracks/add', {method:'POST', body: JSON.stringify({broadcast_id: broadcastId, lang, label})});
+  loadBroadcasts();
+}
+
+async function removeAudioTrack(broadcastId, trackId) {
+  await api('/admin/audio/tracks/remove', {method:'POST', body: JSON.stringify({broadcast_id: broadcastId, track_id: trackId})});
+  loadBroadcasts();
+}
+
+async function simAudioAlert(broadcastId, kind) {
+  await api('/admin/audio/alerts/simulate', {method:'POST', body: JSON.stringify({broadcast_id: broadcastId, kind})});
+  loadBroadcasts();
+}
+
+async function resolveAudioAlert(alertId) {
+  await api('/admin/audio/alerts/resolve', {method:'POST', body: JSON.stringify({alert_id: alertId})});
+  loadBroadcasts();
+}
+
+// ── Panel Nuevo Canal ─────────────────────────────────────────────────────────
+
+let _injMode = 'synthetic';       // 'synthetic' | 'real'
+let _ingestType = 'testsrc2';     // 'testsrc2' | 'srt_push' | 'srt_pull'
+let _presets = [];
+
+async function loadPresets() {
+  try {
+    const r = await api('/admin/broadcasts/presets');
+    _presets = await r.json();
+    const container = document.getElementById('preset-btns');
+    if (!container) return;
+    container.innerHTML = _presets.map((p, i) => `
+      <button onclick="applyPreset(${i})"
+        style="font-size:0.65rem;padding:2px 7px;border-radius:3px;cursor:pointer;
+               border:1px solid var(--border);background:none;color:var(--muted)"
+        id="preset-${p.id}">${p.label}</button>
+    `).join('');
+  } catch(_) {}
+}
+
+function applyPreset(idx) {
+  const p = _presets[idx];
+  if (!p) return;
+  _setVal('v-res', p.video.resolution);
+  _setVal('v-fps', p.video.fps);
+  _setVal('v-kbps', p.video.kbps);
+  _setVal('v-gop', p.video.gop_frames);
+  _setVal('a-kbps', p.audio.kbps);
+  _setVal('a-ch', p.audio.channels);
+  // resaltar preset activo
+  _presets.forEach(x => {
+    const btn = document.getElementById('preset-' + x.id);
+    if (btn) { btn.style.borderColor='var(--border)'; btn.style.color='var(--muted)'; btn.style.background='none'; }
+  });
+  const active = document.getElementById('preset-' + p.id);
+  if (active) { active.style.borderColor='var(--accent)'; active.style.color='var(--accent)'; active.style.background='rgba(79,195,247,0.12)'; }
+  const status = document.getElementById('inj-status');
+  if (status) status.textContent = `Preset "${p.label}" aplicado · ${(p.total_kbps/1000).toFixed(1)} Mbps total`;
+}
+
+function _setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val;
+}
+
+function setInjectMode(mode) {
+  _injMode = mode;
+  const synBtn  = document.getElementById('mode-syn');
+  const realBtn = document.getElementById('mode-real');
+  const srtSec  = document.getElementById('srt-section');
+  const btnSyn  = document.getElementById('btn-synthetic');
+  const btnReal = document.getElementById('btn-real');
+  if (mode === 'synthetic') {
+    synBtn.style.cssText  += ';background:var(--accent);color:#000;border-color:var(--accent)';
+    realBtn.style.cssText += ';background:none;color:var(--muted);border-color:var(--border)';
+    srtSec.style.display = 'none';
+    btnSyn.style.display = ''; btnReal.style.display = 'none';
+  } else {
+    realBtn.style.cssText += ';background:var(--accent);color:#000;border-color:var(--accent)';
+    synBtn.style.cssText  += ';background:none;color:var(--muted);border-color:var(--border)';
+    srtSec.style.display = '';
+    btnSyn.style.display = 'none'; btnReal.style.display = '';
+    updateSrtEndpointPreview();
+  }
+}
+
+function setIngestType(type) {
+  _ingestType = type;
+  const ids = {testsrc2:'src-testsrc', srt_push:'src-push', srt_pull:'src-pull'};
+  Object.entries(ids).forEach(([t, id]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const active = t === type;
+    btn.style.borderColor  = active ? 'var(--accent)' : 'var(--border)';
+    btn.style.color        = active ? 'var(--accent)' : 'var(--muted)';
+    btn.style.background   = active ? 'rgba(79,195,247,0.15)' : 'none';
+  });
+  document.getElementById('srt-common').style.display    = type !== 'testsrc2' ? '' : 'none';
+  document.getElementById('srt-pull-host').style.display = type === 'srt_pull' ? '' : 'none';
+  document.getElementById('srt-push-ep').style.display   = type === 'srt_push' ? '' : 'none';
+  if (type === 'srt_push') updateSrtEndpointPreview();
+}
+
+function updateSrtEndpointPreview() {
+  const el = document.getElementById('srt-ep-url');
+  if (!el) return;
+  const port = document.getElementById('srt-port')?.value || '9998';
+  const lat  = document.getElementById('srt-lat')?.value || '300';
+  const bid  = document.getElementById('inj-id')?.value || 'anon/live2';
+  const hostIp = window.HOST_IP || window.location.hostname || '0.0.0.0';
+  el.textContent = `srt://${hostIp}:${port}?streamid=${bid}&latency=${lat}`;
+}
+
+function addInjTrack() {
+  const lang  = prompt('Código de idioma (ej: en, fr, pt):', 'en');
+  if (!lang) return;
+  const label = prompt('Etiqueta:', lang.toUpperCase()) || lang.toUpperCase();
+  const container = document.getElementById('inj-tracks');
+  const addBtn = container.querySelector('button');
+  const span = document.createElement('span');
+  span.className = 'inj-track-badge';
+  span.dataset.lang = lang; span.dataset.label = label;
+  span.textContent = label + ' ×';
+  span.style.cssText = 'background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.25);border-radius:3px;padding:1px 5px;font-size:0.65rem;color:var(--accent);cursor:pointer';
+  span.onclick = () => removeInjTrack(span);
+  container.insertBefore(span, addBtn);
+}
+
+function removeInjTrack(el) {
+  const badges = document.querySelectorAll('#inj-tracks .inj-track-badge');
+  if (badges.length <= 1) { alert('Debe haber al menos una pista de audio'); return; }
+  el.remove();
+}
+
+function _getInjPayload() {
+  const bid = document.getElementById('inj-id')?.value?.trim() || '';
+  const tracks = [...document.querySelectorAll('#inj-tracks .inj-track-badge')]
+    .map(el => ({lang: el.dataset.lang, label: el.dataset.label}));
+  return {
+    broadcast_id: bid,
+    video: {
+      resolution: document.getElementById('v-res')?.value || '1280x720',
+      fps: parseInt(document.getElementById('v-fps')?.value || '30'),
+      kbps: parseInt(document.getElementById('v-kbps')?.value || '4000'),
+      gop_frames: parseInt(document.getElementById('v-gop')?.value || '30'),
+    },
+    audio: {
+      kbps: parseInt(document.getElementById('a-kbps')?.value || '128'),
+      channels: parseInt(document.getElementById('a-ch')?.value || '2'),
+      sample_rate: 48000,
+      tracks,
+    },
+  };
+}
+
+async function createSynthetic() {
+  const st = document.getElementById('inj-status');
+  const payload = _getInjPayload();
+  if (!payload.broadcast_id) { if(st) st.textContent='⚠ Broadcast ID es obligatorio'; return; }
+  if (payload.audio.kbps < 96) { if(st) st.textContent='⚠ Audio mínimo 96 kbps'; return; }
+  if(st) st.textContent = 'Creando...';
+  try {
+    const r = await api('/admin/broadcasts/create', {method:'POST', body: JSON.stringify({...payload, ingest_type:'synthetic'})});
+    const d = await r.json();
+    if (r.status === 409) { if(st) st.textContent = `⚠ ${d.error}`; return; }
+    if(st) st.textContent = `✓ Canal sintético "${payload.broadcast_id}" creado`;
+    setTimeout(() => loadBroadcasts(), 600);
+  } catch(e) { if(st) st.textContent = 'Error: ' + e.message; }
+}
+
+async function injectReal() {
+  const st = document.getElementById('inj-status');
+  const payload = _getInjPayload();
+  if (!payload.broadcast_id) { if(st) st.textContent='⚠ Broadcast ID es obligatorio'; return; }
+  const srtPayload = _ingestType !== 'testsrc2' ? {
+    port: parseInt(document.getElementById('srt-port')?.value || '9998'),
+    latency_ms: parseInt(document.getElementById('srt-lat')?.value || '300'),
+    passphrase: document.getElementById('srt-pass')?.value || '',
+    host: document.getElementById('srt-host')?.value || '',
+  } : undefined;
+  if (_ingestType === 'srt_pull' && !srtPayload?.host) {
+    if(st) st.textContent = '⚠ Host encoder es obligatorio para SRT Pull'; return;
+  }
+  if(st) st.textContent = 'Inyectando...';
+  try {
+    const body = {...payload, ingest_type: _ingestType};
+    if (srtPayload) body.srt = srtPayload;
+    const r = await api('/admin/broadcasts/inject', {method:'POST', body: JSON.stringify(body)});
+    const d = await r.json();
+    if(st) st.textContent = d.note || 'OK';
+    if (d.ffmpeg_cmd) {
+      document.getElementById('ffmpeg-block').style.display = '';
+      document.getElementById('ffmpeg-cmd').textContent = d.ffmpeg_cmd;
+    }
+    setTimeout(() => loadBroadcasts(), 800);
+  } catch(e) { if(st) st.textContent = 'Error: ' + e.message; }
+}
+
+async function killBroadcast(id) {
+  if (!confirm(`¿Matar broadcast ${id}?`)) return;
+  await api('/admin/broadcasts/kill', {method:'POST', body: JSON.stringify({broadcast_id: id})});
+  loadBroadcasts();
+}
+async function injectBroadcast(id, bitrate) {
+  const st = document.getElementById('inj-status');
+  if (st) st.textContent = 'Inyectando...';
+  const r = await api('/admin/broadcasts/inject', {method:'POST', body: JSON.stringify({broadcast_id: id, bitrate_kbps: bitrate})});
+  const d = await r.json();
+  if (st) st.textContent = d.note || 'OK';
+  setTimeout(() => loadBroadcasts(), 800);
+}
+async function injectFromForm() { await injectReal(); }
+async function stopInject(id) {
+  await api('/admin/broadcasts/stop-inject', {method:'POST', body: JSON.stringify({broadcast_id: id})});
+  loadBroadcasts();
+}
+
+// ── Federación ────────────────────────────────────────────────────────────────
+async function loadFederation() {
+  const r = await api('/admin/federation/nodes');
+  const {active, pending} = await r.json();
+  const pRows = pending.map(n => `<tr><td>${n.id||'—'}</td><td>${n.region||'—'}</td>
+    <td><button class="btn" onclick="approveNode('${n.id}')">Aprobar</button>
+    <button class="btn danger" onclick="revokeNode('${n.id}')">Revocar</button></td></tr>`).join('');
+  setContent(`
+    <div class="grid-3">
+      <div class="card"><div class="label">Nodos activos</div><div class="value green">${active.length}</div></div>
+      <div class="card"><div class="label">Pendientes</div><div class="value yellow">${pending.length}</div></div>
+    </div>
+    <div class="section-title">Simular nodo externo</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Node ID</div>
+        <input id="fed-id" placeholder="sim-relay-xxx" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Región</div>
+        <input id="fed-region" value="eu-west-1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <button class="btn" onclick="simulateNode()">+ Simular nodo</button>
+    </div>
+    <div class="section-title">Nodos pendientes de aprobación</div>
+    ${pending.length ? `<table><thead><tr><th>Node ID</th><th>Región</th><th>Sim</th><th>Acción</th></tr></thead><tbody>${
+      pending.map(n=>`<tr><td>${n.id||'—'}</td><td>${n.region||'—'}</td><td>${n.simulated?'<span class="badge yellow">sim</span>':'—'}</td>
+      <td><button class="btn" onclick="approveNode('${n.id}')">Aprobar</button>
+      <button class="btn danger" onclick="revokeNode('${n.id}')">Revocar</button></td></tr>`).join('')
+    }</tbody></table>`
+      : '<p style="color:var(--muted);font-size:0.85rem">No hay nodos pendientes</p>'}`);
+}
+
+async function approveNode(id) {
+  await api(`/admin/federation/nodes/${id}/approve`, {method:'POST'});
+  loadFederation();
+}
+async function revokeNode(id) {
+  await api(`/admin/federation/nodes/${id}/revoke`, {method:'POST'});
+  loadFederation();
+}
+async function simulateNode() {
+  const id     = document.getElementById('fed-id')?.value.trim() || '';
+  const region = document.getElementById('fed-region')?.value.trim() || 'eu-west-1';
+  const body   = id ? {node_id: id, region} : {region};
+  const r = await api('/admin/federation/simulate-node', {method:'POST', body: JSON.stringify(body)});
+  const d = await r.json();
+  loadFederation();
+}
+
+// ── DRM / Rights ──────────────────────────────────────────────────────────────
+async function loadDRM() {
+  const [subsR, simR] = await Promise.all([
+    api('/admin/drm/subscriptions'),
+    api('/admin/drm/subscriptions/sim-list'),
+  ]);
+  const subs = await subsR.json();
+  const simSubs = await simR.json();
+  const allSubs = [...subs, ...simSubs.filter(s => !subs.find(x=>x.subscription_id===s.subscription_id))];
+  const rows = allSubs.map(s => {
+    const pct = s.max_plays ? Math.min(100, Math.round((s.plays_used/s.max_plays)*100)) : 0;
+    const bar = s.max_plays ? `<div style="width:80px;height:6px;background:var(--border);border-radius:3px;display:inline-block;margin-left:6px"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--red)':pct>60?'var(--yellow)':'var(--green)'};border-radius:3px"></div></div>` : '';
+    return `<tr>
+      <td><code>${s.subscription_id}</code>${s.max_plays?'':''}</td>
+      <td>${s.plays_used}${s.max_plays?`/${s.max_plays}`:''}${bar}</td>
+      <td style="display:flex;gap:4px">
+        ${s.max_plays?`<button class="btn" onclick="consumePlay('${s.subscription_id}')">+1 Play</button>`:''}
+        <button class="btn" onclick="resetSub('${s.subscription_id}')">Reset</button>
+        <button class="btn danger" onclick="revokeSub('${s.subscription_id}')">Revocar</button>
+      </td></tr>`;
+  }).join('');
+  setContent(`
+    <div class="grid-3">
+      <div class="card"><div class="label">Subs Redis</div><div class="value">${subs.length}</div></div>
+      <div class="card"><div class="label">Subs simuladas</div><div class="value yellow">${simSubs.length}</div></div>
+    </div>
+    <div class="section-title">Simulador DRM</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Subscription ID</div>
+        <input id="drm-id" placeholder="sub_auto" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <div style="width:80px"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Max plays</div>
+        <input id="drm-max" type="number" value="5" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem"/></div>
+      <button class="btn" onclick="createSimSub()">+ Crear</button>
+    </div>
+    <div class="section-title">Suscripciones activas</div>
+    ${allSubs.length ? `<table><thead><tr><th>Subscription ID</th><th>Plays</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p style="color:var(--muted);font-size:0.85rem">Sin datos — crea una suscripción de prueba</p>'}`);
+}
+
+async function resetSub(id) {
+  await api(`/admin/drm/subscriptions/${id}/reset`, {method:'POST'});
+  loadDRM();
+}
+async function revokeSub(id) {
+  if (!confirm(`¿Revocar acceso de ${id}?`)) return;
+  await api(`/admin/drm/subscriptions/${id}/revoke`, {method:'POST'});
+  loadDRM();
+}
+async function createSimSub() {
+  const id  = document.getElementById('drm-id')?.value.trim() || '';
+  const max = parseInt(document.getElementById('drm-max')?.value || '5');
+  const body = id ? {subscription_id: id, max_plays: max} : {max_plays: max};
+  await api('/admin/drm/subscriptions/simulate', {method:'POST', body: JSON.stringify(body)});
+  loadDRM();
+}
+async function consumePlay(id) {
+  const r = await api('/admin/drm/subscriptions/consume', {method:'POST', body: JSON.stringify({subscription_id: id})});
+  const d = await r.json();
+  if (!d.allowed) alert(`❌ max_plays (${d.max_plays}) superado para ${id}`);
+  loadDRM();
+}
+
+// ── Monetización ──────────────────────────────────────────────────────────────
+async function loadMonetization() {
+  const [statsR, eventsR] = await Promise.all([
+    api('/admin/monetization/stats'),
+    api('/admin/monetization/events'),
+  ]);
+  const stats = await statsR.json();
+  const events = await eventsR.json();
+  const eRows = events.map(e => `<tr><td><code>${e.id}</code></td><td>${e.type}</td>
+    <td>${e.data?.object?.amount_paid ? (e.data.object.amount_paid/100).toFixed(2)+' '+e.data.object.currency.toUpperCase() : '—'}</td>
+    <td>${new Date(e.created*1000).toLocaleString()}</td></tr>`).join('');
+  setContent(`
+    <div class="grid-3">
+      <div class="card"><div class="label">MRR</div><div class="value green">${(stats.mrr_eur/100).toFixed(2)} €</div></div>
+      <div class="card"><div class="label">Suscripciones activas</div><div class="value">${stats.active_subscriptions}</div></div>
+      <div class="card"><div class="label">Churn</div><div class="value yellow">${stats.churn_rate_pct||0}%</div></div>
+      <div class="card"><div class="label">Dunning</div><div class="value ${stats.dunning_count>0?'red':''}">${stats.dunning_count||0}</div></div>
+    </div>
+    <div class="section-title">Últimos eventos Stripe ${stats.source==='mock'?'(mock)':''}</div>
+    <table><thead><tr><th>ID</th><th>Tipo</th><th>Importe</th><th>Fecha</th></tr></thead><tbody>${eRows}</tbody></table>`);
+}
+
+// ── QoS ───────────────────────────────────────────────────────────────────────
+async function loadQoS() {
+  const [alertsR, latencyR] = await Promise.all([
+    api('/admin/qos/alerts'),
+    api('/admin/qos/latency'),
+  ]);
+  const alertData = await alertsR.json();
+  const {alerts} = alertData;
+  const latency = await latencyR.json();
+  const alertsHtml = alerts.length
+    ? alerts.map(a => {
+        const sim = a.labels?.source === 'simulated';
+        return `<div class="alert-item" style="${sim?'border-color:rgba(255,193,7,0.4);background:rgba(255,193,7,0.08)':''}">
+          <span class="aname">${a.labels?.alertname||'?'}</span>
+          ${sim ? '<span class="badge yellow" style="margin-left:6px">simulada</span>' : ''}
+          — ${a.annotations?.description||a.annotations?.summary||''}
+          ${sim ? `<button class="btn" style="float:right;font-size:0.72rem;padding:2px 8px" onclick="resolveAlert('${a.id}')">Resolver</button>` : ''}
+        </div>`;
+      }).join('')
+    : '<p style="color:var(--green);font-size:0.85rem">✓ Sin alertas activas</p>';
+  const latRows = latency.map(r => `<tr><td><code>${r.namespace}</code></td>
+    <td class="${r.p95>700?'red':''}">${r.p95||0} ms</td><td>${r.samples}</td></tr>`).join('');
+  const grafana = window.GRAFANA_URL || 'http://localhost:3000';
+  // Comprobar si Grafana está disponible
+  let grafanaAvailable = false;
+  try {
+    const gr = await fetch(`${grafana}/api/health`, {signal: AbortSignal.timeout(2000)});
+    grafanaAvailable = gr.ok;
+  } catch(e) { grafanaAvailable = false; }
+
+  const grafanaHtml = grafanaAvailable
+    ? `<iframe class="grafana" src="${grafana}/d/teremoqwow?orgId=1&kiosk=tv" title="Grafana"></iframe>`
+    : `<div style="background:var(--surface);border:1px dashed var(--border);border-radius:8px;padding:2rem;text-align:center;color:var(--muted)">
+        <div style="font-size:1.5rem;margin-bottom:0.5rem">📊</div>
+        <div style="margin-bottom:0.5rem">Grafana no está disponible en modo dev sin Docker</div>
+        <div style="font-size:0.8rem">Para ver el dashboard completo: <code style="background:var(--bg);padding:2px 6px;border-radius:4px">docker compose up grafana prometheus</code></div>
+        <div style="margin-top:1rem"><a href="${grafana}" target="_blank" style="color:var(--accent)">${grafana}</a></div>
+       </div>`;
+
+  const alertNames = ['LipSyncDrift','BufferBelowThreshold','HighE2ELatency','VideoContinuityError'];
+  setContent(`
+    <div class="section-title">Alertas Prometheus activas ${alertData.simulated?`<span style="color:var(--muted);font-size:0.75rem">(${alertData.simulated} simuladas)</span>`:''}</div>
+    ${alertsHtml}
+    <div class="section-title" style="margin-top:1.25rem">Consola de pruebas — disparar alerta</div>
+    <div class="card" style="max-width:480px;margin-bottom:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+      <div style="flex:1"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Tipo de alerta</div>
+        <select id="alert-type" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;border-radius:4px;font-size:0.85rem">
+          ${alertNames.map(n=>`<option value="${n}">${n}</option>`).join('')}
+        </select></div>
+      <button class="btn" style="border-color:var(--red);color:var(--red)" onclick="fireAlert()">🔥 Disparar</button>
+    </div>
+    <div class="section-title" style="margin-top:1.25rem">Latencia P95 por broadcast (últimos 15 min)</div>
+    <table><thead><tr><th>Namespace</th><th>P95</th><th>Muestras</th></tr></thead><tbody>${latRows}</tbody></table>
+    <div class="section-title" style="margin-top:1.25rem">Dashboard Grafana</div>
+    ${grafanaHtml}`);
+}
+
+async function fireAlert() {
+  const name = document.getElementById('alert-type')?.value;
+  await api('/admin/qos/alerts/test', {method:'POST', body: JSON.stringify({alert_name: name})});
+  loadQoS();
+}
+async function resolveAlert(id) {
+  await api('/admin/qos/alerts/resolve', {method:'POST', body: JSON.stringify({id})});
+  loadQoS();
+}
+
+// ── Seguridad ─────────────────────────────────────────────────────────────────
+async function loadSecurity() {
+  const r = await api('/admin/security/rate-limit-hits');
+  const hits = await r.json();
+  const rows = hits.map(h => `<tr><td><code>${h.ip}</code></td><td>${h.requests}</td><td>${h.ttl_s}s</td></tr>`).join('');
+  setContent(`
+    <div class="section-title">Rate-limit hits recientes (Redis rl:*)</div>
+    ${hits.length ? `<table><thead><tr><th>IP</th><th>Requests</th><th>TTL</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p style="color:var(--muted);font-size:0.85rem">Sin hits (Redis vacío o no conectado)</p>'}
+    <div class="section-title" style="margin-top:1.5rem">Rotar secretos</div>
+    <div style="display:flex;gap:1rem;margin-top:0.5rem">
+      <button class="btn" onclick="rotateSecret('webhook')">Rotar WEBHOOK_SECRET</button>
+      <button class="btn" onclick="rotateSecret('jwt')">Rotar JWT key</button>
+    </div>`);
+}
+
+async function rotateSecret(type) {
+  const r = await api('/admin/security/rotate-secret', {method:'POST', body: JSON.stringify({type})});
+  const data = await r.json();
+  alert(`Nuevo secreto (preview): ${data.new_secret_preview}\n\nAcción: ${data.action}\nVariable: ${data.env_var}`);
+}
+
+// ── Feature Flags ─────────────────────────────────────────────────────────────
+async function loadFlags() {
+  const r = await api('/admin/flags');
+  const flags = await r.json();
+  const rows = Object.entries(flags).map(([k, v]) => `
+    <div class="flag-row">
+      <span>${k.replace(/_/g,' ')}</span>
+      <label class="toggle">
+        <input type="checkbox" ${v?'checked':''} onchange="setFlag('${k}',this.checked)" />
+        <span class="slider"></span>
+      </label>
+    </div>`).join('');
+  setContent(`<div class="section-title">Feature Flags globales</div><div class="card" style="max-width:500px">${rows}</div>`);
+}
+
+async function setFlag(flag, enabled) {
+  await api(`/admin/flags/${flag}`, {method:'PATCH', body: JSON.stringify({enabled})});
+}
+
+// ── Auditoría ─────────────────────────────────────────────────────────────────
+async function loadAudit() {
+  const r = await api('/admin/audit?limit=50');
+  const log = await r.json();
+  const rows = log.map(e => `<tr><td>${e.ts}</td><td>${e.actor}</td>
+    <td><span class="badge blue">${e.role}</span></td>
+    <td><code>${e.action}</code></td><td>${e.detail||'—'}</td><td>${e.ip}</td></tr>`).join('');
+  setContent(`
+    <div class="section-title">Log de auditoría (últimas 50 acciones)</div>
+    ${log.length ? `<table><thead><tr><th>Timestamp</th><th>Actor</th><th>Rol</th><th>Acción</th><th>Detalle</th><th>IP</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p style="color:var(--muted);font-size:0.85rem">Sin acciones registradas todavía</p>'}`);
+}
+
+// ── Monitor ───────────────────────────────────────────────────────────────────
+let _monitorInterval = null;
+
+async function loadMonitor() {
+  const relayUrl = window.MOQ_RELAY_URL || 'https://127.0.0.1:4443/anon';
+  setContent(`
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.25rem">
+      <div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem">
+          <div class="section-title" style="margin:0">Consumer — stream en vivo</div>
+          <select id="mon-broadcast" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.5rem;border-radius:4px;font-size:0.82rem">
+            <option value="anon/live1">anon/live1</option>
+          </select>
+          <button class="btn" onclick="refreshMonitor()">⟳ Reconectar</button>
+        </div>
+        <div style="background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;position:relative;border:1px solid var(--border)">
+          <iframe id="mon-player"
+            src="${window.PLAYER_URL || 'http://localhost:5173'}"
+            style="width:100%;height:100%;border:none"
+            allow="autoplay; camera; microphone"
+            sandbox="allow-scripts allow-same-origin allow-forms">
+          </iframe>
+          <div id="mon-overlay" style="position:absolute;inset:0;background:rgba(0,0,0,0.7);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff">
+            <div style="font-size:2rem;margin-bottom:0.5rem">📡</div>
+            <div id="mon-status-text" style="font-size:0.9rem;color:var(--muted)">Verificando origen...</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="section-title" style="margin-bottom:0.75rem">Estado del origen</div>
+        <div class="card" id="mon-source-card">
+          <div class="loading" style="padding:1rem 0">Consultando relay...</div>
+        </div>
+        <div class="section-title" style="margin:1rem 0 0.75rem">Relay</div>
+        <div class="card">
+          <div class="flag-row" style="border:none;padding:0.4rem 0">
+            <span style="font-size:0.82rem;color:var(--muted)">MoQ Relay</span>
+            <a href="http://localhost:8090" target="_blank" style="color:var(--accent);font-size:0.82rem">localhost:8090 ↗</a>
+          </div>
+          <div class="flag-row" style="border:none;padding:0.4rem 0">
+            <span style="font-size:0.82rem;color:var(--muted)">Player</span>
+            <a href="http://localhost:5173" target="_blank" style="color:var(--accent);font-size:0.82rem">localhost:5173 ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>`);
+  startMonitorPolling();
+}
+
+async function startMonitorPolling() {
+  if (_monitorInterval) clearInterval(_monitorInterval);
+  await pollMonitorSource();
+  _monitorInterval = setInterval(pollMonitorSource, 3000);
+}
+
+async function pollMonitorSource() {
+  const broadcast = document.getElementById('mon-broadcast')?.value || 'anon/live1';
+  try {
+    const r = await api(`/admin/monitor/source?broadcast=${encodeURIComponent(broadcast)}`);
+    const d = await r.json();
+    const card = document.getElementById('mon-source-card');
+    const overlay = document.getElementById('mon-overlay');
+    const statusTxt = document.getElementById('mon-status-text');
+    if (!card) return;
+
+    if (d.broadcasting) {
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+          <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite"></span>
+          <span style="color:var(--green);font-weight:600">TRANSMITIENDO</span>
+        </div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem">Broadcast: <code>${d.broadcast}</code></div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Tracks activos:</div>
+        ${d.tracks.map(t=>`<div style="font-size:0.78rem;padding:2px 0;color:var(--text)">· <code>${t}</code></div>`).join('')}
+        <div style="margin-top:0.5rem;font-size:0.75rem;color:var(--muted)">Clock: ${d.has_clock?'✓ presente':'—'} · Fuente: ${d.source}</div>`;
+      if (overlay) overlay.style.display = 'none';
+    } else {
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+          <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block"></span>
+          <span style="color:var(--red);font-weight:600">SIN SEÑAL</span>
+        </div>
+        <div style="font-size:0.82rem;color:var(--muted)">No hay broadcast activo en <code>${d.broadcast}</code></div>
+        <div style="margin-top:0.75rem">
+          <button class="btn" style="font-size:0.8rem" onclick="injectBroadcast('${d.broadcast}', 4000)">▶ Inyectar stream de prueba</button>
+        </div>`;
+      if (overlay) { overlay.style.display = 'flex'; if(statusTxt) statusTxt.textContent = 'Sin señal — inyecta un stream primero'; }
+    }
+  } catch(e) {
+    const card = document.getElementById('mon-source-card');
+    if (card) card.innerHTML = '<div style="color:var(--red);font-size:0.82rem">Error consultando el relay</div>';
+  }
+}
+
+function refreshMonitor() {
+  const iframe = document.getElementById('mon-player');
+  if (iframe) iframe.src = iframe.src;
+  pollMonitorSource();
+}
+
+// Limpiar interval al cambiar de página
+const _origNavigate = navigate;
+function navigate(el) {
+  if (_monitorInterval) { clearInterval(_monitorInterval); _monitorInterval = null; }
+  _origNavigate(el);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+if (token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    if (payload.exp > Date.now()/1000) {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('user-email').textContent = payload.email;
+      document.getElementById('sidebar-user').textContent = `${payload.role} · ${payload.email}`;
+      loadPage(currentPage);
+    } else { token = ''; localStorage.removeItem('admin_token'); }
+  } catch(e) { token = ''; localStorage.removeItem('admin_token'); }
+}
+</script>
+</body>
+</html>

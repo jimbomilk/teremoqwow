@@ -10,9 +10,28 @@ import os
 import time
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 
 import jsonschema
 import jwt  # PyJWT >= 2.0
+
+# Redis para rate-limit distribuido (opcional — fallback a memoria)
+_redis: Optional[object] = None
+
+def _get_redis():
+    global _redis
+    if _redis is None:
+        url = os.environ.get("REDIS_URL", "")
+        if url:
+            try:
+                import redis as _redis_lib
+                client = _redis_lib.Redis.from_url(url, decode_responses=True)
+                client.ping()
+                _redis = client
+                logger.info("registry: conectado a Redis %s", url)
+            except Exception as exc:
+                logger.warning("registry: Redis no disponible (%s), usando memoria", exc)
+    return _redis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,11 +63,22 @@ _RESOLVER = jsonschema.RefResolver(
     store=_SCHEMA_STORE,
 )
 
-# rate limiter en memoria: {ip: [monotonic_timestamp, ...]}
+# rate limiter en memoria (fallback cuando Redis no está disponible)
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 
 
 def _check_rate_limit(ip: str) -> bool:
+    r = _get_redis()
+    if r is not None:
+        try:
+            key = f"rl:{ip}"
+            count = r.incr(key)
+            if count == 1:
+                r.expire(key, _RATE_WINDOW)
+            return count <= _RATE_LIMIT
+        except Exception as exc:
+            logger.warning("registry: rate-limit Redis error: %s", exc)
+    # fallback memoria
     now = time.monotonic()
     _rate_buckets[ip] = [t for t in _rate_buckets[ip] if now - t < _RATE_WINDOW]
     if len(_rate_buckets[ip]) >= _RATE_LIMIT:
@@ -58,10 +88,15 @@ def _check_rate_limit(ip: str) -> bool:
 
 
 def _load_private_key() -> str:
+    # Acepta clave inline (REGISTRY_PRIVATE_KEY) o path a fichero PEM
     key = os.environ.get("REGISTRY_PRIVATE_KEY")
-    if not key:
-        raise RuntimeError("REGISTRY_PRIVATE_KEY env var no definida")
-    return key
+    if key:
+        return key
+    path = os.environ.get("REGISTRY_PRIVATE_KEY_PATH")
+    if path:
+        with open(path) as f:
+            return f.read()
+    raise RuntimeError("Define REGISTRY_PRIVATE_KEY o REGISTRY_PRIVATE_KEY_PATH")
 
 
 def _issue_cluster_jwt(node_id: str, region: str) -> str:
