@@ -31,6 +31,16 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# Métricas Prometheus — opcionales (no bloquean si prometheus_client no está instalado)
+try:
+    from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+    _WEBHOOK_REQUESTS = Counter("billing_webhook_requests_total", "Stripe webhook requests", ["status"])
+    _DRM_LICENSES     = Counter("billing_drm_licenses_issued_total", "DRM licenses issued")
+    _GEO_BLOCKED      = Counter("billing_geo_blocked_total", "Requests geo-blocked", ["country"])
+    _PROMETHEUS_OK    = True
+except ImportError:
+    _PROMETHEUS_OK    = False
+
 # Ventana anti-replay: rechazar eventos con timestamp > 5 min de antigüedad
 _STRIPE_MAX_REPLAY_SEC = 300
 
@@ -162,6 +172,13 @@ def stripe_webhook() -> tuple[Response, int] | Response:
 @app.route("/health", methods=["GET"])
 def health() -> tuple[Response, int]:
     return jsonify({"status": "ok", "service": "billing"}), 200
+
+
+@app.route("/metrics", methods=["GET"])
+def metrics() -> tuple[Response, int]:
+    if not _PROMETHEUS_OK:
+        return Response("# prometheus_client no disponible\n", mimetype="text/plain"), 200
+    return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST), 200
 
 
 if __name__ == "__main__":
