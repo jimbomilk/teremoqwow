@@ -242,47 +242,61 @@ async function loadBroadcasts() {
           : '<button class="btn" onclick="injectBroadcast(\'' + b.id + '\', 4000)">▶ Reinyectar</button>'}
       </td>
     </tr>`).join('');
-  const pulseStyle = isLive
-    ? 'width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite'
-    : 'width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block';
-  const tracks = (source.tracks||[]).map(t=>`<code style="margin-right:6px;font-size:0.75rem">${t}</code>`).join('');
+  // Mosaico adaptativo: columnas según número de broadcasts activos
+  const active = data.filter(b => b.status === 'active');
+  const n = active.length || 1;
+  const cols = n === 1 ? 1 : n === 2 ? 2 : n <= 4 ? 2 : 3;
+  const tileHeight = n === 1 ? '420px' : n <= 4 ? '260px' : '200px';
+
+  const mosaic = active.length
+    ? active.map(b => {
+        const bLive = b.status === 'active';
+        const pulse = bLive
+          ? 'width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite;flex-shrink:0'
+          : 'width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;flex-shrink:0';
+        const viewUrl = `${playerUrl}?broadcast=${encodeURIComponent(b.id)}`;
+        return `
+          <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;border:1px solid var(--border);height:${tileHeight}">
+            <iframe src="${viewUrl}" style="width:100%;height:100%;border:none" allow="autoplay" sandbox="allow-scripts allow-same-origin"></iframe>
+            <!-- Barra de info superpuesta -->
+            <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:0.5rem 0.6rem;display:flex;align-items:center;gap:0.5rem">
+              <span style="${pulse}"></span>
+              <code style="font-size:0.72rem;color:#fff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.id}</code>
+              <span style="font-size:0.7rem;color:rgba(255,255,255,0.6)">${(b.bitrate_kbps/1000).toFixed(1)} Mbps</span>
+              <button onclick="navigator.clipboard.writeText('${viewUrl}').then(()=>this.textContent='✓').catch(()=>{})"
+                style="background:rgba(255,255,255,0.1);border:none;color:#fff;padding:2px 7px;border-radius:3px;cursor:pointer;font-size:0.7rem">
+                Copiar URL
+              </button>
+              <button onclick="stopInject('${b.id}')"
+                style="background:rgba(239,83,80,0.3);border:none;color:#ef5350;padding:2px 7px;border-radius:3px;cursor:pointer;font-size:0.7rem">
+                ⏹
+              </button>
+            </div>
+          </div>`;
+      }).join('')
+    : `<div style="background:var(--surface);border:1px dashed var(--border);border-radius:8px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);grid-column:1/-1">
+        <div style="font-size:2rem;margin-bottom:0.5rem">📡</div>
+        <div style="font-size:0.85rem">Sin broadcasts activos</div>
+      </div>`;
 
   setContent(`
-    <div style="display:grid;grid-template-columns:1fr 320px;gap:1.25rem;margin-bottom:1.25rem">
-      <!-- Player consumer -->
+    <div style="display:grid;grid-template-columns:1fr 300px;gap:1.25rem;margin-bottom:1.25rem">
+      <!-- Mosaico -->
       <div>
-        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.6rem">
-          <span style="${pulseStyle}"></span>
-          <span style="font-weight:600;font-size:0.9rem;color:${isLive?'var(--green)':'var(--red)'}">
-            ${isLive?'EN VIVO':'SIN SEÑAL'}
-          </span>
-          <span style="font-size:0.75rem;color:var(--muted)">${source.broadcast}</span>
-          ${tracks}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.6rem">
+          <div class="section-title" style="margin:0">Señales en vivo (${active.length})</div>
+          <span style="font-size:0.75rem;color:var(--muted)">${cols === 1?'1 columna':cols+' columnas'} · recarga para actualizar</span>
         </div>
-        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--border)">
-          <iframe src="${playerUrl}"
-            style="width:100%;height:100%;border:none"
-            allow="autoplay"
-            sandbox="allow-scripts allow-same-origin">
-          </iframe>
-          ${!isLive?`<div style="position:absolute;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted)">
-            <div style="font-size:2rem;margin-bottom:0.5rem">📡</div>
-            <div style="font-size:0.85rem">Sin señal — inyecta un stream primero</div>
-          </div>`:''}
-        </div>
-        <!-- URL pública -->
-        <div style="margin-top:0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem;display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:0.75rem;color:var(--muted)">URL para ver la señal:</span>
-          <a href="${playerUrl}" target="_blank" style="color:var(--accent);font-size:0.82rem;font-family:monospace">${playerUrl}</a>
-          <button class="btn" style="font-size:0.75rem;padding:2px 8px" onclick="navigator.clipboard.writeText('${playerUrl}').then(()=>this.textContent='✓').catch(()=>{})">Copiar</button>
+        <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:0.6rem">
+          ${mosaic}
         </div>
       </div>
-      <!-- Panel lateral: origen + inyector -->
+      <!-- Panel lateral -->
       <div>
         <div class="section-title" style="margin-bottom:0.6rem">Inyectar stream</div>
         <div class="card" style="margin-bottom:0.75rem">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.6rem">
-            <div><div style="font-size:0.72rem;color:var(--muted);margin-bottom:3px">Broadcast</div>
+            <div><div style="font-size:0.72rem;color:var(--muted);margin-bottom:3px">Broadcast ID</div>
               <input id="inj-id" value="anon/live1" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.35rem;border-radius:4px;font-size:0.82rem"/></div>
             <div><div style="font-size:0.72rem;color:var(--muted);margin-bottom:3px">Bitrate kbps</div>
               <input id="inj-br" type="number" value="4000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.35rem;border-radius:4px;font-size:0.82rem"/></div>
@@ -295,14 +309,14 @@ async function loadBroadcasts() {
         </div>
         <div class="section-title" style="margin-bottom:0.6rem">Stats</div>
         <div class="card">
-          <div class="stat-item"><span class="stat-label">Broadcasts activos</span><span class="stat-value">${data.filter(b=>b.status==='active').length}</span></div>
+          <div class="stat-item"><span class="stat-label">Activos</span><span class="stat-value green">${active.length}</span></div>
           <div class="stat-item"><span class="stat-label">Bitrate total</span><span class="stat-value">${(data.reduce((s,b)=>s+b.bitrate_kbps,0)/1000).toFixed(1)} Mbps</span></div>
           <div class="stat-item"><span class="stat-label">Viewers</span><span class="stat-value">${data.reduce((s,b)=>s+b.viewers,0)}</span></div>
-          <div class="stat-item"><span class="stat-label">Clock MoQ</span><span class="stat-value" style="color:${source.has_clock?'var(--green)':'var(--muted)'}">${source.has_clock?'✓ presente':'—'}</span></div>
+          <div class="stat-item"><span class="stat-label">Origen ${source.broadcast}</span><span class="stat-value" style="color:${isLive?'var(--green)':'var(--red)'}">${isLive?'🟢 LIVE':'🔴 OFF'}</span></div>
         </div>
       </div>
     </div>
-    <div class="section-title">Lista de broadcasts</div>
+    <div class="section-title">Todos los broadcasts</div>
     <table><thead><tr><th>Broadcast</th><th>Estado</th><th>Bitrate</th><th>Viewers</th><th>Encoder</th><th>Acciones</th></tr></thead>
     <tbody>${rows}</tbody></table>`);
 }

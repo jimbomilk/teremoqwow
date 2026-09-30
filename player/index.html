@@ -201,12 +201,15 @@
     <script type="module">
       import { MoQWatch } from './src/moq-watch.ts';
 
-      // URLs inyectadas por Vite desde .env (VITE_MOQ_RELAY_URL, VITE_RELAY_BROADCAST)
+      // URLs inyectadas por Vite desde .env o parámetros de URL (?relay=...&broadcast=...)
+      const _params = new URLSearchParams(location.search);
       const canvas = document.getElementById('moq-canvas') as HTMLCanvasElement;
-      const url = canvas?.getAttribute('data-url')
+      const url = _params.get('relay')
+        || canvas?.getAttribute('data-url')
         || import.meta.env.VITE_MOQ_RELAY_URL
         || 'https://127.0.0.1:4443/anon';
-      const name = canvas?.getAttribute('data-name')
+      const name = _params.get('broadcast')
+        || canvas?.getAttribute('data-name')
         || import.meta.env.VITE_RELAY_BROADCAST
         || 'anon/live1';
       const certHash = canvas?.getAttribute('data-cert-hash') || import.meta.env.VITE_MOQ_CERT_HASH || '';
