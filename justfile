@@ -86,3 +86,38 @@ login:
     @curl -s -X POST http://localhost:9002/auth/login \
       -H "Content-Type: application/json" \
       -d '{"email":"admin@teremoqwow.dev","password":"dev-secret"}' | python3 -m json.tool
+# Compartir el player en la red local — accesible desde otro ordenador via HTTPS+MoQ
+# Uso: just share [broadcast]
+# En el otro ordenador abre la URL que se imprime en Chrome/Edge
+share broadcast="anon/live1":
+    #!/usr/bin/env bash
+    set -e
+    HOST_IP=$(hostname -I | awk '{print $1}')
+    CERT_HASH=$(openssl x509 -in config/relay/certs/relay.pem -noout -fingerprint -sha256 \
+      | tr -d ':' | awk -F= '{print tolower($2)}')
+    RELAY_URL="https://${HOST_IP}:4443/anon"
+    PLAYER_URL="https://${HOST_IP}:5443?relay=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${RELAY_URL}'))")&broadcast=$(python3 -c "import urllib.parse; print(urllib.parse.quote('{{broadcast}}'))")&cert=${CERT_HASH}"
+    echo ""
+    echo "═══════════════════════════════════════════════════════"
+    echo "  teremoqwow — Player compartido en red local"
+    echo "═══════════════════════════════════════════════════════"
+    echo ""
+    echo "  Player URL (abre en Chrome/Edge en el otro ordenador):"
+    echo "  ${PLAYER_URL}"
+    echo ""
+    echo "  Relay MoQ:  ${RELAY_URL}"
+    echo "  Broadcast:  {{broadcast}}"
+    echo "  Cert hash:  ${CERT_HASH}"
+    echo ""
+    echo "  IMPORTANTE — En Windows abre el puerto del relay:"
+    echo "  netsh advfirewall firewall add rule name=moq-relay protocol=UDP dir=in action=allow localport=4443"
+    echo "  netsh advfirewall firewall add rule name=moq-player protocol=TCP dir=in action=allow localport=5443"
+    echo ""
+    echo "  Iniciando player HTTPS en ${HOST_IP}:5443 ..."
+    echo "═══════════════════════════════════════════════════════"
+    echo ""
+    cd player && VITE_HTTPS=1 \
+      VITE_MOQ_RELAY_URL=${RELAY_URL} \
+      VITE_RELAY_BROADCAST={{broadcast}} \
+      VITE_MOQ_CERT_HASH=${CERT_HASH} \
+      npm run dev -- --host 2>&1

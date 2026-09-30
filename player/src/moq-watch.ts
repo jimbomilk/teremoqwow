@@ -108,7 +108,7 @@ export class MoQWatch extends HTMLElement {
           pointer-events: auto;
         }
       </style>
-      <canvas></canvas>
+      <canvas width="1280" height="720"></canvas>
       <div id="overlay-container"></div>
     `;
     this.canvas = this.shadowRoot.querySelector('canvas');

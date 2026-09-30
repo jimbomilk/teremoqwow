@@ -1013,6 +1013,20 @@ def monitor_source():
     }), 200
 
 
+@app.route("/admin/relay/connections", methods=["GET"])
+def relay_connections():
+    """Consulta /announced del relay para ver broadcasts activos y sesiones."""
+    relay_web = os.environ.get("MOQ_RELAY_WEB", "http://localhost:8090")
+    try:
+        with urllib.request.urlopen(f"{relay_web}/announced", timeout=2) as resp:
+            raw = resp.read().decode().strip()
+            # /announced devuelve líneas con los namespaces publicados
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            return jsonify({"broadcasts": lines, "count": len(lines), "relay": relay_web, "online": True}), 200
+    except Exception as e:
+        return jsonify({"broadcasts": [], "count": 0, "relay": relay_web, "online": False, "error": str(e)}), 200
+
+
 @app.route("/admin/relay/cert-hash", methods=["GET"])
 def relay_cert_hash():
     """Devuelve el SHA-256 del cert TLS del relay para WebTransport."""

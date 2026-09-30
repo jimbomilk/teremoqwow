@@ -148,7 +148,11 @@ const API = window.ADMIN_API_URL || 'http://localhost:9004';
 let token = localStorage.getItem('admin_token') || '';
 let currentPage = 'broadcasts';
 
-// Leer cert hash del relay al arrancar (sin auth, endpoint público)
+// Detectar host desde la URL actual (localhost, IP local, o hostname Tailscale)
+// para que el iframe cargue desde la misma máquina que sirve el admin
+const _host = window.location.hostname || 'localhost';
+window.MOQ_RELAY_URL = `https://${_host}:4443/anon`;
+window.PLAYER_URL    = `https://${_host}:5443`;
 (async () => {
   try {
     const r = await fetch(`${API}/admin/relay/cert-hash`);
@@ -237,7 +241,8 @@ function _signalTileId(broadcastId) { return 'tile-' + broadcastId.replace(/\W/g
 function _renderSignalTile(b, audioInfo, ls, playerUrl) {
   const tid  = _signalTileId(b.id);
   const cert = window.MOQ_CERT_HASH ? `&cert=${encodeURIComponent(window.MOQ_CERT_HASH)}` : '';
-  const viewUrl = `${playerUrl}?embed=1&broadcast=${encodeURIComponent(b.id)}${cert}`;
+  const relayParam = window.MOQ_RELAY_URL ? `&relay=${encodeURIComponent(window.MOQ_RELAY_URL)}` : '';
+  const viewUrl = `${playerUrl}?embed=1&broadcast=${encodeURIComponent(b.id)}${relayParam}${cert}`;
   const lsMs = ls?.lipsync_ms ?? 0;
   const lsOk = Math.abs(lsMs) < 40;
   const lsColor = lsOk ? 'var(--green)' : Math.abs(lsMs) < 80 ? 'var(--yellow)' : 'var(--red)';
@@ -273,14 +278,24 @@ function _renderSignalTile(b, audioInfo, ls, playerUrl) {
     <!-- ── Body 3 paneles ── -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;min-height:200px;flex:1">
 
-      <!-- 📹 VIDEO -->
+      <!-- 📹 VIDEO — preview del origen (fuente antes de MoQ) -->
       <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0">
-        <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">📹 Vídeo</div>
-        <canvas id="cv-vid-${tid}" style="flex:1;width:100%;display:block;min-height:120px"></canvas>
+        <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">
+          📹 Vídeo <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· origen</span>
+        </div>
+        <video id="cv-vid-${tid}"
+          src="/preview.mp4"
+          autoplay muted loop playsinline
+          style="flex:1;width:100%;height:220px;min-height:220px;display:block;background:#000;object-fit:cover"></video>
         <div style="padding:0.35rem 0.6rem;font-size:0.7rem;line-height:1.6;border-top:1px solid rgba(255,255,255,0.06)">
           <div style="color:var(--text);font-weight:500">${b.video_resolution||'1280×720'} · ${b.video_fps||30} fps</div>
           <div style="color:var(--muted)">${b.video_codec||'H.264'} ${b.video_profile||'Main'}</div>
           <div style="color:var(--accent)">${(videoKbps/1000).toFixed(1)} Mbps vídeo</div>
+          <div style="margin-top:3px">
+            <a href="${viewUrl}" target="_blank" style="font-size:0.65rem;color:var(--accent);text-decoration:none">
+              ↗ ver stream MoQ en el player
+            </a>
+          </div>
         </div>
       </div>
 
@@ -304,7 +319,8 @@ function _renderSignalTile(b, audioInfo, ls, playerUrl) {
         <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">📊 Data</div>
         <div style="padding:0.5rem 0.7rem;flex:1;font-size:0.72rem;line-height:1.85">
           <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Total bitrate</span><span style="color:var(--text)">${(b.bitrate_kbps/1000).toFixed(1)} Mbps</span></div>
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Viewers</span><span style="color:var(--text)">${b.viewers}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Viewers</span><span id="viewers-${tid}" style="color:var(--text)">${b.viewers}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Relay</span><span id="relay-status-${tid}" style="color:var(--muted);font-size:0.65rem">—</span></div>
           <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Lip-sync</span><span style="color:${lsColor}">${lsMs >= 0 ? '+' : ''}${lsMs} ms ${lsOk ? '✓' : '⚠'}</span></div>
           <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Latencia</span><span style="color:var(--green)">&lt;100 ms</span></div>
           <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Encoder</span><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px" title="${b.encoder||'—'}">${b.encoder||'—'}</span></div>
@@ -544,6 +560,37 @@ async function loadBroadcasts() {
 
   loadPresets();
   requestAnimationFrame(() => _startSignalAnimations(active));
+  _startRelayPoll(active);
+}
+
+// ── Poll al relay para conexiones en tiempo real ───────────────────────────────
+
+let _relayPollTimer = null;
+function _startRelayPoll(broadcasts) {
+  if (_relayPollTimer) clearInterval(_relayPollTimer);
+  async function poll() {
+    try {
+      const r = await fetch(`${API}/admin/relay/connections`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      broadcasts.forEach(b => {
+        const tid = _signalTileId(b.id);
+        const viewersEl = document.getElementById('viewers-' + tid);
+        const statusEl  = document.getElementById('relay-status-' + tid);
+        if (!viewersEl || !statusEl) return;
+        const isLive = d.online && d.broadcasts.some(s => s.includes(b.id.split('/')[0]));
+        const viewers = isLive ? Math.max(b.viewers, 1) : b.viewers;
+        viewersEl.textContent = String(viewers);
+        viewersEl.style.color = isLive ? 'var(--green)' : 'var(--muted)';
+        statusEl.textContent  = d.online ? (isLive ? '🟢 publicando' : '🟡 sin stream') : '🔴 relay off';
+        statusEl.style.color  = d.online ? (isLive ? 'var(--green)' : 'var(--yellow)') : 'var(--red)';
+      });
+    } catch(_) {}
+  }
+  poll(); // inmediato
+  _relayPollTimer = setInterval(poll, 3000); // cada 3s
 }
 
 // ── Animaciones de señal ───────────────────────────────────────────────────────
@@ -558,9 +605,9 @@ function _startSignalAnimations(broadcasts) {
 function _animateTile(b) {
   const tid = _signalTileId(b.id);
 
-  // ── VIDEO canvas: waveform de vídeo ──────────────────────────────────────
+  // ── VIDEO: ahora es un iframe con el player real, no animamos ─────────────
   const cvv = document.getElementById('cv-vid-' + tid);
-  if (cvv) {
+  if (cvv && cvv.tagName === 'CANVAS') {
     const ctx = cvv.getContext('2d');
     const W = cvv.offsetWidth || 200, H = cvv.offsetHeight || 120;
     cvv.width = W; cvv.height = H;
