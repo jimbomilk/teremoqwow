@@ -1,0 +1,170 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, "fase-*"]
+
+jobs:
+  # ── QoS integration test (moq-relay + FFmpeg) ──────────────────────────────
+  qos-integration:
+    name: QoS integration test (4/4 checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker network + certs
+        run: |
+          docker network create teremoqwow-e2e 2>/dev/null || true
+          mkdir -p /tmp/teremoqwow-e2e/certs
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out /tmp/teremoqwow-e2e/certs/private.pem 2>/dev/null
+          # Self-signed cert valid 13 days (WebTransport limit)
+          openssl req -new -x509 -key /tmp/teremoqwow-e2e/certs/private.pem \
+            -out /tmp/teremoqwow-e2e/certs/relay.pem \
+            -days 13 -subj "/CN=relay.dev.local" \
+            -addext "subjectAltName=DNS:relay.dev.local,IP:127.0.0.1" 2>/dev/null
+          cp /tmp/teremoqwow-e2e/certs/private.pem /tmp/teremoqwow-e2e/certs/relay.key
+
+      - name: Start moq-relay
+        run: |
+          docker run -d --name moq-relay \
+            --network teremoqwow-e2e \
+            -v /tmp/teremoqwow-e2e/certs:/certs:ro \
+            -p 4443:4443/udp -p 4443:4443/tcp -p 4444:4444 -p 8090:8090 \
+            moqdev/moq-relay:0.15.7 \
+            --listen '[::]:4443' \
+            --listen-tls-cert /certs/relay.pem \
+            --listen-tls-key /certs/relay.key \
+            --listen-tcp-bind '[::]:4444' \
+            --auth-public 'anon/**' \
+            --web-http-listen '[::]:8090'
+          # Wait for relay to be ready
+          timeout 30 bash -c 'until docker logs moq-relay 2>&1 | grep -q "listening"; do sleep 1; done'
+          echo "moq-relay ready"
+
+      - name: Run QoS integration test (4/4)
+        run: |
+          SKIP_NETEM=1 WINDOW_SEC=15 timeout 180 bash qos/scripts/integration-test.sh
+        env:
+          SKIP_NETEM: "1"
+          WINDOW_SEC: "15"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f moq-relay 2>/dev/null || true
+
+  # ── DRM / Billing unit tests ───────────────────────────────────────────────
+  drm-billing:
+    name: DRM & Billing flow test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install flask PyJWT cryptography jsonschema redis 2>/dev/null
+
+      - name: Generate RSA key for tests
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out /tmp/test-private.pem 2>/dev/null
+
+      - name: Run DRM flow test
+        run: bash comercial/billing/test_drm_flow.sh
+        env:
+          JWT_RS256_PRIVATE_KEY_PATH: /tmp/test-private.pem
+
+      - name: Run auth module test
+        run: |
+          python3 - << 'EOF'
+          import os, sys
+          os.environ['JWT_RS256_PRIVATE_KEY_PATH'] = '/tmp/test-private.pem'
+          os.environ['REDIS_URL'] = ''
+          sys.path.insert(0, 'comercial/auth')
+          from auth_server import app
+          with app.test_client() as c:
+              r = c.post('/auth/login', json={'email':'admin@teremoqwow.dev','password':'dev-secret'})
+              assert r.status_code == 200, f"login failed: {r.status_code}"
+              token = r.get_json()['access_token']
+              r = c.get('/auth/me', headers={'Authorization': f'Bearer {token}'})
+              assert r.status_code == 200, f"me failed: {r.status_code}"
+              assert r.get_json()['role'] == 'superadmin'
+              print("auth tests: PASS")
+          EOF
+
+      - name: Run portal module test
+        run: |
+          python3 - << 'EOF'
+          import os, sys
+          os.environ['JWT_RS256_PRIVATE_KEY_PATH'] = '/tmp/test-private.pem'
+          os.environ['REDIS_URL'] = ''
+          os.environ['CLICKHOUSE_URL'] = 'http://localhost:9999'
+          sys.path.insert(0, 'comercial/auth')
+          sys.path.insert(0, 'comercial/portal')
+          from auth_server import _issue_access_token, _users
+          from portal_server import app
+          token = _issue_access_token(_users['admin@teremoqwow.dev'])
+          with app.test_client() as c:
+              r = c.get('/account/usage', headers={'Authorization': f'Bearer {token}'})
+              assert r.status_code == 200, f"usage failed: {r.status_code}"
+              r = c.get('/account/invoices', headers={'Authorization': f'Bearer {token}'})
+              assert r.status_code == 200, f"invoices failed: {r.status_code}"
+              r = c.get('/account/subscription', headers={'Authorization': f'Bearer {token}'})
+              assert r.status_code == 200
+              r = c.get('/account/usage')
+              assert r.status_code == 401, f"no-auth should be 401, got {r.status_code}"
+              print("portal tests: PASS")
+          EOF
+
+  # ── Federación ────────────────────────────────────────────────────────────
+  federation:
+    name: Federation & clustering
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python (for verify-federation.sh)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyJWT
+        run: pip install PyJWT cryptography 2>/dev/null
+
+      - name: Create Docker network
+        run: docker network create teremoqwow-e2e 2>/dev/null || true
+
+      - name: Generate RSA key
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out /tmp/test-private.pem 2>/dev/null
+
+      - name: Run federation verification
+        run: bash scripts/verify-federation.sh
+        env:
+          REGISTRY_PRIVATE_KEY_PATH: /tmp/test-private.pem
+
+      - name: Run clustering test
+        run: bash scripts/test-cluster.sh
+
+  # ── Schema validation ─────────────────────────────────────────────────────
+  schemas:
+    name: Schema validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validate JSON schemas
+        run: bash scripts/validate-schemas.sh

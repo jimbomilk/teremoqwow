@@ -5,4 +5,4 @@ providers:
     folder: Teremoqwow
     type: file
     options:
-      path: /etc/grafana/dashboards
+      path: /var/lib/grafana/dashboards
