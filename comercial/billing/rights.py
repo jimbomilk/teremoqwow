@@ -1,55 +1,99 @@
 """
 Frequency Rights Management — #83
-Contador max_plays por suscripción. Thread-safe.
-
-En producción: sustituir _plays_store por Redis con INCR + TTL igual al período de suscripción.
-Ejemplo Redis: INCR plays:{sub_id}  /  EXPIRE plays:{sub_id} <billing_cycle_seconds>
+Contador max_plays por suscripción respaldado por Redis.
+TTL = 30 días por defecto (configurable via RIGHTS_TTL_DAYS).
 """
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 logger = logging.getLogger(__name__)
 
-# En prod: cliente Redis inyectado via DI (e.g. redis.Redis.from_url(os.environ["REDIS_URL"]))
+# TTL en días para el contador por suscripción (se renueva en cada INCR)
+_RIGHTS_TTL = int(os.environ.get("RIGHTS_TTL_DAYS", "30")) * 86400
+
+_redis_client = None
+_redis_lock = threading.Lock()
+
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is None:
+        with _redis_lock:
+            if _redis_client is None:
+                redis_url = os.environ.get("REDIS_URL", "")
+                if redis_url:
+                    try:
+                        import redis
+                        _redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+                        _redis_client.ping()
+                        logger.info("rights: conectado a Redis %s", redis_url)
+                    except Exception as exc:
+                        logger.warning("rights: Redis no disponible (%s), usando memoria", exc)
+                        _redis_client = None
+    return _redis_client
+
+
+# Fallback en memoria cuando Redis no está disponible
 _plays_store: dict[str, int] = {}
-_lock = threading.Lock()
+_mem_lock = threading.Lock()
 
 
 class RightsManager:
-    """Controla cuántas reproducciones ha consumido cada suscripción en el período actual."""
+    """Controla cuántas reproducciones ha consumido cada suscripción."""
 
     def record_play(self, subscription_id: str, max_plays: int) -> bool:
-        """
-        Registra una reproducción para la suscripción dada.
-
-        Returns:
-            True  si la reproducción está dentro del límite permitido.
-            False si se ha superado max_plays → responder HTTP 403 al cliente.
-        """
-        with _lock:
+        key = f"rights:{subscription_id}:plays"
+        r = _get_redis()
+        if r is not None:
+            try:
+                current = int(r.get(key) or 0)
+                if current >= max_plays:
+                    logger.info("max_plays_exceeded sub=%s plays=%d limit=%d",
+                                subscription_id, current, max_plays)
+                    return False
+                pipe = r.pipeline()
+                pipe.incr(key)
+                pipe.expire(key, _RIGHTS_TTL)
+                pipe.execute()
+                return True
+            except Exception as exc:
+                logger.error("rights: Redis error en record_play: %s", exc)
+        # fallback memoria
+        with _mem_lock:
             current = _plays_store.get(subscription_id, 0)
             if current >= max_plays:
-                logger.info(
-                    "max_plays_exceeded sub=%s plays=%d limit=%d",
-                    subscription_id, current, max_plays,
-                )
                 return False
             _plays_store[subscription_id] = current + 1
             return True
 
     def get_play_count(self, subscription_id: str) -> int:
-        with _lock:
+        key = f"rights:{subscription_id}:plays"
+        r = _get_redis()
+        if r is not None:
+            try:
+                return int(r.get(key) or 0)
+            except Exception:
+                pass
+        with _mem_lock:
             return _plays_store.get(subscription_id, 0)
 
     def reset(self, subscription_id: str) -> None:
         """Reinicia el contador — llamar en renovación de ciclo de facturación."""
-        with _lock:
+        key = f"rights:{subscription_id}:plays"
+        r = _get_redis()
+        if r is not None:
+            try:
+                r.delete(key)
+                return
+            except Exception:
+                pass
+        with _mem_lock:
             _plays_store.pop(subscription_id, None)
 
 
-# Instancia singleton — en prod: inyectar un RightsManager respaldado por Redis
 _rights_manager = RightsManager()
 
 

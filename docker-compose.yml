@@ -113,6 +113,33 @@ services:
       retries: 6
     restart: unless-stopped
 
+  # ── Auth Service ──────────────────────────────────────────────────────────
+  auth:
+    build:
+      context: ./comercial/auth
+      dockerfile: Dockerfile
+    networks: [teremoqwow-dev]
+    ports:
+      - "9002:9002"
+    environment:
+      JWT_RS256_PRIVATE_KEY_PATH: /keys/private.pem
+      JWT_RS256_PUBLIC_KEY_PATH: /keys/public.pem
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/2}
+      AUTH_SEED_USERS: ${AUTH_SEED_USERS:-admin@teremoqwow.dev:dev-secret:superadmin}
+      ACCESS_TOKEN_TTL: "900"
+      REFRESH_TOKEN_TTL: "2592000"
+    volumes:
+      - ./config/relay/certs:/keys:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
   # ── Player (Vite dev server) ───────────────────────────────────────────────
   player:
     build:
