@@ -60,3 +60,41 @@ El relay retiene grupos activos según `max-age`; el player ABR conmuta suscripc
 - `core/` contiene lógica común reutilizable (sync, catálogo, tipos). No conoce infraestructura.
 - `relay/` y `player/` son binarios/aplicaciones; sus `Cargo.lock` / `package-lock.json` se versionan.
 - `adapters/` habla con APIs externas (Opta, Stats Perform, GeoIP) y normaliza al esquema canónico.
+
+## Fase 7 — Producción y Observabilidad
+
+### Objetivos
+
+Consolidar la plataforma para operación 24/7 con SLOs contractuales, monitoreo externo,
+portales de cliente y desarrollador, y runbooks de respuesta a incidentes.
+
+### Componentes añadidos
+
+| Componente | Directorio | Descripción |
+|---|---|---|
+| SLA / SLOs | [docs/sla.md](sla.md) | Tabla de indicadores y penalizaciones |
+| Monitoreo Site24x7 | [config/monitoring/site24x7.yaml](../config/monitoring/site24x7.yaml) | Sondas externas sobre endpoints críticos |
+| Stripe Customer Portal | [comercial/stripe-portal/config.json](../comercial/stripe-portal/config.json) | Portal de autogestión de suscripción |
+| Moesif Developer Portal | [comercial/moesif/config.yaml](../comercial/moesif/config.yaml) | Portal de uso, facturas y API keys |
+| Runbooks | [docs/runbooks/](runbooks/) | Procedimientos de respuesta a incidentes |
+
+### Flujo de observabilidad en Fase 7
+
+```mermaid
+flowchart LR
+  SITE24X7[Site24x7 sondas] -->|HTTP checks 1 min| KRAKEND[KrakenD API Gateway]
+  KRAKEND --> PROM[Prometheus]
+  PROM --> GRAFANA[Grafana dashboards]
+  GRAFANA -->|alerta P95 > 700ms| SLACK[Slack #alertas-produccion]
+  GRAFANA -->|alerta disponibilidad| PD[PagerDuty]
+  PD --> RUNBOOKS[Runbooks docs/runbooks/]
+```
+
+### SLOs vigentes (Fase 7)
+
+| Indicador | Objetivo |
+|---|---|
+| Disponibilidad | ≥ 99.99 % mensual |
+| Latencia E2E P95 | < 700 ms |
+| Tasa error HTTP 5xx | < 0.1 % |
+| Lip-sync | < 45 ms |
