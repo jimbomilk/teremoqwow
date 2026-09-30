@@ -168,7 +168,10 @@
       </div>
 
       <div class="canvas-container">
-        <canvas id="moq-canvas" data-url="https://127.0.0.1:4443/anon" data-name="anon/live1" data-cert-hash=""></canvas>
+        <canvas id="moq-canvas"
+          data-url="%VITE_MOQ_RELAY_URL%"
+          data-name="%VITE_RELAY_BROADCAST%"
+          data-cert-hash="%VITE_MOQ_CERT_HASH%"></canvas>
         <div id="abr-status">-- · -- Mbps</div>
       </div>
 
@@ -198,11 +201,15 @@
     <script type="module">
       import { MoQWatch } from './src/moq-watch.ts';
 
-      // Obtener canvas y atributos
+      // URLs inyectadas por Vite desde .env (VITE_MOQ_RELAY_URL, VITE_RELAY_BROADCAST)
       const canvas = document.getElementById('moq-canvas') as HTMLCanvasElement;
-      const url = canvas?.getAttribute('data-url') || 'https://127.0.0.1:4443/anon';
-      const name = canvas?.getAttribute('data-name') || 'anon/live1';
-      const certHash = canvas?.getAttribute('data-cert-hash') || '';
+      const url = canvas?.getAttribute('data-url')
+        || import.meta.env.VITE_MOQ_RELAY_URL
+        || 'https://127.0.0.1:4443/anon';
+      const name = canvas?.getAttribute('data-name')
+        || import.meta.env.VITE_RELAY_BROADCAST
+        || 'anon/live1';
+      const certHash = canvas?.getAttribute('data-cert-hash') || import.meta.env.VITE_MOQ_CERT_HASH || '';
 
       // Actualizar display del cert-hash
       const certHashDisplay = document.getElementById('cert-hash-display');
