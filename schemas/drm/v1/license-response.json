@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/drm/v1/license-response.json",
+  "title": "LicenseResponse",
+  "description": "Respuesta del proxy de licencia DRM. El campo license contiene la respuesta CDM en base64; los demás campos son informativos.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["drm_system", "content_id", "license"],
+  "properties": {
+    "drm_system": {
+      "type": "string",
+      "enum": ["widevine", "playready", "fairplay"]
+    },
+    "content_id": {
+      "type": "string",
+      "description": "Identificador del contenido protegido, espejo del request."
+    },
+    "license": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "Blob de licencia CDM en base64 emitido por EZDRM."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Expiración de la licencia (ISO 8601). Ausente si el DRM system no lo informa."
+    }
+  }
+}

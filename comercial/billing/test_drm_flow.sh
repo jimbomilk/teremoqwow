@@ -253,6 +253,60 @@ PYEOF
 
 ################################################################################
 echo ""
+echo "=== #80 EZDRM: proxy_license_request (STUB) ==="
+################################################################################
+python3 - <<'PYEOF'
+import sys, base64
+errors = 0
+from ezdrm_client import proxy_license_request
+
+valid_challenge = base64.b64encode(b"fake CDM challenge bytes 0123456789").decode()
+
+# Challenge base64 válido + drm_system widevine → devuelve bytes no vacíos
+try:
+    result = proxy_license_request("widevine", "test_content_id", valid_challenge)
+    if isinstance(result, bytes) and len(result) > 0:
+        print("  ✓ PASS: proxy_license_request widevine → retorna bytes no vacíos")
+    else:
+        print(f"  ✗ FAIL: resultado inesperado: type={type(result)} len={len(result) if isinstance(result, bytes) else 'N/A'}")
+        errors += 1
+except Exception as e:
+    print(f"  ✗ FAIL: excepción inesperada con challenge válido: {e}"); errors += 1
+
+# Challenge con caracteres no-base64 → ValueError (sanitización)
+for bad_challenge in ["<script>alert(1)</script>", "'; DROP TABLE--", "../../etc/passwd"]:
+    try:
+        proxy_license_request("widevine", "test_content_id", bad_challenge)
+        print(f"  ✗ FAIL: challenge inválido no lanzó ValueError: {bad_challenge!r}"); errors += 1
+    except ValueError:
+        print(f"  ✓ PASS: challenge no-base64 lanza ValueError: {bad_challenge[:30]!r}")
+    except Exception as e:
+        print(f"  ✗ FAIL: excepción incorrecta {type(e).__name__} para {bad_challenge!r}: {e}"); errors += 1
+
+# El campo license (bytes → base64) es base64 válido
+try:
+    result = proxy_license_request("playready", "test_content_id", valid_challenge)
+    license_b64 = base64.b64encode(result).decode()
+    base64.b64decode(license_b64, validate=True)  # lanza si no es base64 puro
+    print("  ✓ PASS: bytes de licencia son codificables como base64 válido (campo license)")
+except Exception as e:
+    print(f"  ✗ FAIL: campo license no es base64 válido: {e}"); errors += 1
+
+# drm_system desconocido → ValueError
+try:
+    proxy_license_request("unknown_drm", "test_content_id", valid_challenge)
+    print("  ✗ FAIL: drm_system desconocido no lanzó ValueError"); errors += 1
+except ValueError:
+    print("  ✓ PASS: drm_system desconocido → ValueError")
+except Exception as e:
+    print(f"  ✗ FAIL: excepción incorrecta {type(e).__name__}: {e}"); errors += 1
+
+sys.exit(errors)
+PYEOF
+[[ $? -eq 0 ]] && pass "ezdrm_client proxy_license_request" || fail "ezdrm_client proxy_license_request"
+
+################################################################################
+echo ""
 echo "============================================"
 echo " RESULTADO FINAL — DRM Flow Test"
 echo " PASS: $PASS   FAIL: $FAIL"
