@@ -21,7 +21,9 @@ import hmac
 import json
 import logging
 import os
+import threading
 import time
+from collections import defaultdict
 from typing import Optional
 
 import jwt  # PyJWT >= 2.0
@@ -43,6 +45,24 @@ except ImportError:
 
 # Ventana anti-replay: rechazar eventos con timestamp > 5 min de antigüedad
 _STRIPE_MAX_REPLAY_SEC = 300
+
+# Rate-limit en memoria: sliding window por IP de conexión
+_RATE_LIMIT_MAX = 100
+_RATE_LIMIT_WINDOW = 60  # segundos
+_rate_store: dict[str, list[float]] = defaultdict(list)
+_rate_lock = threading.Lock()
+
+
+def _check_webhook_rate_limit(ip: str) -> bool:
+    now = time.time()
+    with _rate_lock:
+        window = [t for t in _rate_store[ip] if now - t < _RATE_LIMIT_WINDOW]
+        if len(window) >= _RATE_LIMIT_MAX:
+            _rate_store[ip] = window
+            return False
+        window.append(now)
+        _rate_store[ip] = window
+        return True
 
 # Idempotencia: set de event.id ya procesados (en prod: Redis con TTL 24h)
 _processed_events: set[str] = set()
@@ -113,6 +133,9 @@ def _emit_access_token(customer_id: str, subscription_id: str, namespace: str) -
 
 @app.route("/v1/stripe/webhook", methods=["POST"])
 def stripe_webhook() -> tuple[Response, int] | Response:
+    if not _check_webhook_rate_limit(request.remote_addr):
+        return Response("Too Many Requests", status=429)
+
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
     if not secret:
         logger.error("STRIPE_WEBHOOK_SECRET no configurado")
