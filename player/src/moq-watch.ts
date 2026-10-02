@@ -2,6 +2,20 @@ import { estimateNTPOffset, calculateLatency, formatLatency } from './latency';
 import { AbrController, DEFAULT_RENDITIONS, type Rendition } from './abr';
 import { OverlaySyncScheduler, type TimingDeviation } from './overlay-sync';
 
+/** Fetches cert hash from KrakenD /cert-hash, falling back to a provided getter. */
+export async function fetchCertHash(
+  getCertHashAttr: () => string | null,
+): Promise<string | null> {
+  try {
+    const r = await fetch('/cert-hash');
+    if (r.ok) {
+      const d = await r.json();
+      if (d.cert_hash) return d.cert_hash;
+    }
+  } catch (_) {}
+  return getCertHashAttr() || null;
+}
+
 /**
  * moq-watch Web Component (Headless Player)
  *
@@ -73,6 +87,10 @@ export class MoQWatch extends HTMLElement {
     this.cleanup();
   }
 
+  private _fetchCertHash(): Promise<string | null> {
+    return fetchCertHash(() => this.getAttribute('cert-hash'));
+  }
+
   private render() {
     if (!this.shadowRoot) return;
     this.shadowRoot.innerHTML = `
@@ -122,7 +140,7 @@ export class MoQWatch extends HTMLElement {
 
       const url = this.getAttribute('url') || 'https://127.0.0.1:4443/anon';
       const name = this.getAttribute('name') || 'anon/live1';
-      const certHash = this.getAttribute('cert-hash');
+      const certHash = await this._fetchCertHash();
       const abrWindow = parseInt(this.getAttribute('abr-window') || '5', 10);
 
       if (!this.canvas) {

@@ -114,6 +114,67 @@ def _redis():
     return _redis_client
 
 
+# ── Broadcast Redis helpers ───────────────────────────────────────────────────
+
+_BCAST_TTL = 86400  # 24 h
+
+
+def _bcast_key(broadcast_id: str) -> str:
+    return f"broadcast:{broadcast_id}"
+
+
+def _bcast_get(broadcast_id: str) -> dict | None:
+    """Reads from Redis first, falls back to memory. Returns None if not found."""
+    r = _redis()
+    if r:
+        try:
+            val = r.get(_bcast_key(broadcast_id))
+            if val:
+                return json.loads(val)
+        except Exception as exc:
+            logger.warning("admin: _bcast_get: %s", exc)
+    return _broadcasts.get(broadcast_id)
+
+
+def _bcast_set(broadcast_id: str, data: dict) -> None:
+    """Writes to memory and Redis (if available)."""
+    _broadcasts[broadcast_id] = data
+    r = _redis()
+    if r:
+        try:
+            r.setex(_bcast_key(broadcast_id), _BCAST_TTL, json.dumps(data))
+        except Exception as exc:
+            logger.warning("admin: _bcast_set: %s", exc)
+
+
+def _bcast_list() -> list[dict]:
+    """Returns all broadcasts: merges Redis keys with in-memory state."""
+    result: dict[str, dict] = dict(_broadcasts)
+    r = _redis()
+    if r:
+        try:
+            for key in r.keys("broadcast:*"):
+                val = r.get(key)
+                if val:
+                    item = json.loads(val)
+                    bid = item.get("id", key[len("broadcast:"):])
+                    result[bid] = item
+        except Exception as exc:
+            logger.warning("admin: _bcast_list: %s", exc)
+    return list(result.values())
+
+
+def _bcast_delete(broadcast_id: str) -> None:
+    """Removes from memory and Redis."""
+    _broadcasts.pop(broadcast_id, None)
+    r = _redis()
+    if r:
+        try:
+            r.delete(_bcast_key(broadcast_id))
+        except Exception as exc:
+            logger.warning("admin: _bcast_delete: %s", exc)
+
+
 # ── MÓDULO: Broadcasts ─────────────────────────────────────────────────────────
 
 AUDIO_KBPS_DEFAULT = 128  # mínimo EBU R128 broadcast estéreo
@@ -186,7 +247,7 @@ def _next_srt_port() -> int:
 def list_broadcasts():
     claims, err = _require_role(*ANALYST_ROLES)
     if err: return err
-    return jsonify(list(_broadcasts.values())), 200
+    return jsonify(_bcast_list()), 200
 
 
 @app.route("/admin/broadcasts/kill", methods=["POST"])
@@ -195,10 +256,12 @@ def kill_broadcast():
     if err: return err
     broadcast_id = (request.get_json(silent=True) or {}).get("broadcast_id") or request.args.get("id", "")
     bcast_key = urllib.parse.unquote(broadcast_id)
-    if bcast_key not in _broadcasts:
+    bcast = _bcast_get(bcast_key)
+    if bcast is None:
         return jsonify({"error": "broadcast no encontrado"}), 404
-    _broadcasts[bcast_key]["status"] = "killed"
-    _broadcasts[bcast_key]["killed"] = True
+    bcast["status"] = "killed"
+    bcast["killed"] = True
+    _bcast_set(bcast_key, bcast)
     _audit(claims, "kill_broadcast", bcast_key)
     # En prod: llamar a moq-relay API DELETE /broadcasts/{id}
     logger.info("admin: broadcast %s killed por %s", bcast_key, claims.get("email"))
@@ -309,7 +372,7 @@ def inject_broadcast():
     else:
         return jsonify({"error": f"ingest_type desconocido: {ingest_type}"}), 400
 
-    _broadcasts[broadcast_id] = {
+    _bcast_set(broadcast_id, {
         "id": broadcast_id,
         "status": "active",
         "status_reason": "",
@@ -335,7 +398,7 @@ def inject_broadcast():
         "lipsync_ms": 0,
         "srt_port": _srt_ports.get(broadcast_id),
         "srt_endpoint": srt_endpoint,
-    }
+    })
     _audit(claims, f"inject_broadcast:{ingest_type}", broadcast_id)
     return jsonify({
         "status": "injecting",
@@ -362,8 +425,10 @@ def stop_inject():
     except Exception:
         pass
     broadcast_id = (request.get_json(silent=True) or {}).get("broadcast_id", "anon/live1")
-    if broadcast_id in _broadcasts:
-        _broadcasts[broadcast_id]["status"] = "stopped"
+    bcast = _bcast_get(broadcast_id)
+    if bcast:
+        bcast["status"] = "stopped"
+        _bcast_set(broadcast_id, bcast)
     _audit(claims, "stop_inject", broadcast_id)
     return jsonify({"status": "stopped"}), 200
 
@@ -554,7 +619,7 @@ def create_broadcast():
     broadcast_id = body.get("broadcast_id", "")
     if not broadcast_id:
         return jsonify({"error": "broadcast_id es obligatorio"}), 400
-    if broadcast_id in _broadcasts:
+    if _bcast_get(broadcast_id) is not None:
         return jsonify({"error": f"broadcast '{broadcast_id}' ya existe"}), 409
 
     vcfg = body.get("video", {})
@@ -574,7 +639,7 @@ def create_broadcast():
         for i, t in enumerate(raw_tracks)
     ]
 
-    _broadcasts[broadcast_id] = {
+    data = {
         "id": broadcast_id,
         "status": "active",
         "status_reason": "",
@@ -600,8 +665,9 @@ def create_broadcast():
         "audio_tracks": audio_tracks,
         "lipsync_ms": 0,
     }
+    _bcast_set(broadcast_id, data)
     _audit(claims, "create_broadcast", broadcast_id)
-    return jsonify(_broadcasts[broadcast_id]), 201
+    return jsonify(data), 201
 
 
 # ── MÓDULO: Federación ─────────────────────────────────────────────────────────
@@ -1138,9 +1204,18 @@ def relay_connections():
     try:
         with urllib.request.urlopen(f"{relay_web}/announced", timeout=2) as resp:
             raw = resp.read().decode().strip()
-            # /announced devuelve líneas con los namespaces publicados
             lines = [l.strip() for l in raw.splitlines() if l.strip()]
-            return jsonify({"broadcasts": lines, "count": len(lines), "relay": relay_web, "online": True}), 200
+        # Update viewer counts for matching broadcasts using real relay data
+        for bid in list(_broadcasts.keys()):
+            prefix = bid.split("/")[0]
+            if any(prefix in line for line in lines):
+                bcast = _bcast_get(bid)
+                if bcast:
+                    bcast["viewers"] = max(bcast.get("viewers", 0), len(
+                        [l for l in lines if prefix in l]
+                    ))
+                    _bcast_set(bid, bcast)
+        return jsonify({"broadcasts": lines, "count": len(lines), "relay": relay_web, "online": True}), 200
     except Exception as e:
         return jsonify({"broadcasts": [], "count": 0, "relay": relay_web, "online": False, "error": str(e)}), 200
 

@@ -53,8 +53,10 @@ def _make_token(role: str) -> str:
 @pytest.fixture(autouse=True)
 def clear_users():
     auth_server._users.clear()
+    auth_server._anon_rate_buckets.clear()
     yield
     auth_server._users.clear()
+    auth_server._anon_rate_buckets.clear()
 
 
 @pytest.fixture()
@@ -155,3 +157,58 @@ def test_broadcaster_token_cannot_register_admin(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
+
+# ── E1-T1: Anonymous token endpoint ──────────────────────────────────────────
+
+def test_anon_token_returns_jwt(client):
+    """POST /auth/token-anonymous → 200, response contains decodable JWT."""
+    resp = client.post("/auth/token-anonymous")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["expires_in"] == auth_server.ANON_TOKEN_TTL
+    # JWT must be decodable
+    import jwt as _jwt
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_private_key
+    priv = load_pem_private_key(_PRIVATE_PEM.encode(), password=None)
+    pub = priv.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+    decoded = _jwt.decode(data["access_token"], pub, algorithms=["RS256"])
+    assert decoded["role"] == "viewer"
+
+
+def test_anon_token_claims(client):
+    """JWT from /auth/token-anonymous has role=viewer and anon=True."""
+    resp = client.post("/auth/token-anonymous")
+    assert resp.status_code == 200
+    token = resp.get_json()["access_token"]
+    import jwt as _jwt
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_private_key
+    priv = load_pem_private_key(_PRIVATE_PEM.encode(), password=None)
+    pub = priv.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+    claims = _jwt.decode(token, pub, algorithms=["RS256"])
+    assert claims["role"] == "viewer"
+    assert claims["anon"] is True
+
+
+def test_anon_cannot_use_admin_endpoint(client):
+    """Anon viewer JWT must be rejected (403) on a privileged-role endpoint."""
+    resp = client.post("/auth/token-anonymous")
+    assert resp.status_code == 200
+    token = resp.get_json()["access_token"]
+    # /auth/register with role=admin requires PRIVILEGED_ROLES → 403 for viewer
+    resp2 = client.post(
+        "/auth/register",
+        json={"email": "evil_anon@t.com", "password": "secret", "role": "admin"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp2.status_code == 403
+
+
+def test_anon_rate_limit(client):
+    """11th request to /auth/token-anonymous from same IP must return 429."""
+    for i in range(10):
+        r = client.post("/auth/token-anonymous")
+        assert r.status_code == 200, f"request {i+1} should be allowed"
+    r11 = client.post("/auth/token-anonymous")
+    assert r11.status_code == 429

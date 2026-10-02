@@ -12,6 +12,7 @@ import os
 import secrets
 import time
 import uuid
+from collections import defaultdict
 from typing import Optional
 
 import jwt
@@ -26,6 +27,11 @@ CORS(app, origins='*')  # dev only
 
 ACCESS_TTL = int(os.environ.get("ACCESS_TOKEN_TTL", "900"))      # 15 min
 REFRESH_TTL = int(os.environ.get("REFRESH_TOKEN_TTL", "2592000"))  # 30 días
+ANON_TOKEN_TTL = 14400  # 4 h
+
+_ANON_RATE_LIMIT = int(os.environ.get("ANON_RATE_LIMIT", "10"))
+_ANON_RATE_WINDOW = 60  # seconds
+_anon_rate_buckets: dict[str, list[float]] = defaultdict(list)
 
 # Roles válidos del sistema
 VALID_ROLES = {"viewer", "broadcaster", "admin", "superadmin"}
@@ -50,6 +56,26 @@ def _get_redis():
             except Exception as exc:
                 logger.error("auth: Redis no disponible: %s", exc)
     return _redis_client
+
+
+def _check_anon_rate_limit(ip: str) -> bool:
+    """Sliding window 10 req/60 s por IP para /auth/token-anonymous."""
+    r = _get_redis()
+    if r is not None:
+        try:
+            key = f"anon_rl:{ip}"
+            count = r.incr(key)
+            if count == 1:
+                r.expire(key, _ANON_RATE_WINDOW)
+            return count <= _ANON_RATE_LIMIT
+        except Exception:
+            pass
+    now = time.monotonic()
+    _anon_rate_buckets[ip] = [t for t in _anon_rate_buckets[ip] if now - t < _ANON_RATE_WINDOW]
+    if len(_anon_rate_buckets[ip]) >= _ANON_RATE_LIMIT:
+        return False
+    _anon_rate_buckets[ip].append(now)
+    return True
 
 
 # ── Usuarios (ClickHouse / en memoria para dev) ────────────────────────────────
@@ -279,6 +305,29 @@ def me() -> tuple[Response, int]:
     if not claims:
         return jsonify({"error": "token inválido o expirado"}), 401
     return jsonify({k: claims[k] for k in ("sub", "email", "role", "plan", "namespace") if k in claims}), 200
+
+
+@app.route("/auth/token-anonymous", methods=["POST"])
+def token_anonymous() -> tuple[Response, int]:
+    """Emite JWT de corta duración para viewers anónimos (no requiere registro)."""
+    ip = request.remote_addr or "0.0.0.0"
+    if not _check_anon_rate_limit(ip):
+        return jsonify({"error": "rate limit excedido"}), 429
+    now = int(time.time())
+    claims = {
+        "sub": str(uuid.uuid4()),
+        "role": "viewer",
+        "anon": True,
+        "iat": now,
+        "exp": now + ANON_TOKEN_TTL,
+        "jti": secrets.token_hex(8),
+    }
+    token = jwt.encode(claims, _load_private_key(), algorithm="RS256")
+    return jsonify({
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": ANON_TOKEN_TTL,
+    }), 200
 
 
 @app.route("/health", methods=["GET"])
