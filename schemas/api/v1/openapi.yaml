@@ -29,6 +29,31 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+  /drm/license:
+    post:
+      summary: Solicitar licencia DRM (proxy EZDRM)
+      operationId: requestDrmLicense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: https://teremoqwow.dev/schemas/drm/v1/license-request.json
+      responses:
+        "200":
+          description: Licencia CDM emitida
+          content:
+            application/json:
+              schema:
+                $ref: https://teremoqwow.dev/schemas/drm/v1/license-response.json
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
   /interactions:
     post:
       summary: Registrar interacción del espectador (voto, reacción, pregunta)
