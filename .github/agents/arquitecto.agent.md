@@ -58,3 +58,25 @@ Cuando una tarea entra en un dominio concreto, delégala al agente responsable:
 | Portal cliente (Stripe Portal), portal dev (Moesif) | `Client Portal` |
 
 Tras recibir el trabajo del especialista validas contratos, corres `scripts/validate-schemas.sh` si aplica y sólo entonces publicas.
+# Seguimiento de progreso — GitHub Project
+
+**Todo el trabajo del proyecto se registra en el proyecto GitHub #3 "Teremoqwow roadmap":**
+`https://github.com/users/jimbomilk/projects/3/views/1`
+
+**Reglas obligatorias — se aplican siempre, en toda operación:**
+
+1. **Nuevos issues** → vincularlos al proyecto inmediatamente tras crearlos:
+   ```bash
+   gh project item-add 3 --owner jimbomilk --url <issue_url>
+   ```
+2. **Nuevos PRs** → vincularlos al proyecto inmediatamente tras abrirlos:
+   ```bash
+   gh project item-add 3 --owner jimbomilk --url <pr_url>
+   ```
+3. **Al cerrar un issue o mergear un PR** → verificar que el item está en el proyecto antes de cerrar.
+4. **Nunca crear un issue o PR sin vincularlo al proyecto** — es el único punto de verdad del estado del proyecto.
+5. Al iniciar cualquier sesión de trabajo, ejecutar:
+   ```bash
+   gh project item-list 3 --owner jimbomilk --limit 200
+   ```
+   para conocer el estado actual antes de actuar.
