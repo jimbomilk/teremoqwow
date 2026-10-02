@@ -18,6 +18,7 @@ import secrets
 import time
 import uuid
 from typing import Optional
+from urllib.parse import urlparse
 
 import jwt
 from flask import Flask, Response, jsonify, request
@@ -66,6 +67,27 @@ def _require_auth():
     if not user:
         return None, (jsonify({"error": "Autenticación requerida"}), 401)
     return user, None
+
+
+# ── Return URL allowlist ─────────────────────────────────────────────────────
+
+_ALLOWED_RETURN_HOSTS_DEFAULT = "localhost,127.0.0.1,teremoqwow.dev"
+
+
+def _is_allowed_return_url(url: str) -> bool:
+    """Returns True only if url's hostname is in the ALLOWED_RETURN_HOSTS allowlist."""
+    if not url:
+        return False
+    hosts_raw = os.environ.get("ALLOWED_RETURN_HOSTS", _ALLOWED_RETURN_HOSTS_DEFAULT)
+    allowed = {h.strip() for h in hosts_raw.split(",") if h.strip()}
+    try:
+        hostname = urlparse(url).hostname or ""
+        return any(
+            hostname == h or hostname.endswith("." + h)
+            for h in allowed
+        )
+    except Exception:
+        return False
 
 
 # ── ClickHouse ────────────────────────────────────────────────────────────────
@@ -346,6 +368,9 @@ def create_portal_session() -> tuple[Response, int]:
         return err
     body = request.get_json(silent=True) or {}
     return_url = body.get("return_url", "http://localhost:5173/account")
+    if not _is_allowed_return_url(return_url):
+        logger.warning("portal: return_url rechazado: %s", return_url)
+        return jsonify({"error": "return_url no permitido"}), 400
     url = _stripe_portal_session(user.get("sub", ""), return_url)
     if not url:
         return jsonify({"error": "No se pudo crear sesión Stripe"}), 502

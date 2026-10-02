@@ -27,10 +27,18 @@ LIPSYNC_THRESHOLD_MS="${LIPSYNC_THRESHOLD_MS:-45}"
 PTS_SYNC_THRESHOLD_MS="${PTS_SYNC_THRESHOLD_MS:-50}"
 WINDOW_SEC="${WINDOW_SEC:-15}"
 SKIP_NETEM="${SKIP_NETEM:-0}"
+SKIP_REMOTE_CHECK="${SKIP_REMOTE_CHECK:-0}"
+SKIP_REMOTE_LATENCY="${SKIP_REMOTE_LATENCY:-0}"
+SKIP_CERT_CHECK="${SKIP_CERT_CHECK:-0}"
+PLAYER_HOST="${PLAYER_HOST:-laptop-077c92vt.tailbd33d7.ts.net}"
+PLAYER_PORT="${PLAYER_PORT:-5443}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASS_COUNT=0
 FAIL_COUNT=0
+TOTAL_CHECKS=4
+[[ "$SKIP_REMOTE_LATENCY" == "0" ]] && TOTAL_CHECKS=5
+REMOTE_PREFLIGHT_OUTPUT=""
 RESULTS=()
 
 ##############################################################################
@@ -59,11 +67,50 @@ if ! docker network ls | grep -q "$DOCKER_NET"; then
   echo "[INTEGRATION] ERROR: red '$DOCKER_NET' no encontrada. Inicia la pipeline primero." >&2
   exit 1
 fi
+
+# ── Cert expiry check (salteable en CI con SKIP_CERT_CHECK=1) ──────────────
+if [[ "${SKIP_CERT_CHECK}" == "0" ]]; then
+  WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  for _cert_rel in "config/relay/certs/relay.pem" "config/relay/certs/player.pem"; do
+    _cert_path="${WORKSPACE_ROOT}/${_cert_rel}"
+    [[ ! -f "$_cert_path" ]] && continue
+    _end_date=$(openssl x509 -enddate -noout -in "$_cert_path" 2>/dev/null | cut -d= -f2-)
+    _expiry_epoch=$(date -d "$_end_date" +%s 2>/dev/null) || { log "WARN: no se pudo parsear fecha de ${_cert_rel}"; continue; }
+    _now_epoch=$(date +%s)
+    _days_left=$(( (_expiry_epoch - _now_epoch) / 86400 ))
+    if (( _days_left < 0 )); then
+      fail "cert caducado: ${_cert_rel} (expiró hace $(( -_days_left )) días)"
+      exit 1
+    elif (( _days_left <= 3 )); then
+      log "WARN: cert ${_cert_rel} expira en ${_days_left} días — ejecuta scripts/renew-dev-certs.sh"
+    fi
+  done
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -q "^${RELAY_HOST}$"; then
   echo "[INTEGRATION] ERROR: contenedor '${RELAY_HOST}' no está corriendo." >&2
   exit 1
 fi
 log "Pipeline activa: OK"
+
+##############################################################################
+# CHECK 0. Preflight remoto (salteable con SKIP_REMOTE_CHECK=1)
+##############################################################################
+
+if [[ "$SKIP_REMOTE_CHECK" == "0" ]]; then
+  log "--- CHECK 0: Preflight remoto ---"
+  set +e
+  REMOTE_PREFLIGHT_OUTPUT=$(bash "${SCRIPT_DIR}/check-remote-client.sh" 2>&1)
+  REMOTE_RC=$?
+  set -e
+  if [[ $REMOTE_RC -eq 0 ]]; then
+    log "✓ Preflight remoto: OK"
+  else
+    log "⚠ WARN: Preflight remoto rc=${REMOTE_RC} — continuando"
+  fi
+else
+  log "SKIP_REMOTE_CHECK=1 — omitiendo preflight remoto"
+fi
 
 # Eliminar inyectores de streams previos para que ENCODER_START_MS sea el T0 real
 log "Eliminando streams previos en ${DOCKER_NET}..."
@@ -213,11 +260,41 @@ set -e
 case "$MEASURE_RC" in
   0) pass "Latencia glass-to-glass P95 ≤ 700ms" ;;
   2) log "[INTEGRATION] ⚠ WARN: Latencia P95 no evaluable con CLI (overhead moq 0.12.7 + ffprobe TS)"
-     log "[INTEGRATION]   → Medida real requiere player web (/metrics/latency) o moq-clock-ietf"
+     log "[INTEGRATION]   → usa CHECK 5 para medida real del player"
      PASS_COUNT=$((PASS_COUNT + 1))
      RESULTS+=("WARN: Latencia P95 inconclusive (CLI overhead — pipeline OK)") ;;
   *) fail "Latencia glass-to-glass P95 > 700ms" ;;
 esac
+
+##############################################################################
+# CHECK 5. Latencia glass-to-glass desde player remoto (/metrics/latency)
+##############################################################################
+
+if [[ "$SKIP_REMOTE_LATENCY" == "0" ]]; then
+  log "--- CHECK 5/${TOTAL_CHECKS}: Latencia glass-to-glass (player remoto) ---"
+  set +e
+  METRICS_JSON=$(curl -sk --max-time 5 "https://${PLAYER_HOST}:${PLAYER_PORT}/metrics/latency" 2>/dev/null || true)
+  set -e
+  if [[ -z "${METRICS_JSON}" ]]; then
+    log "⚠ WARN: /metrics/latency no responde (player no disponible)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+    RESULTS+=("WARN: Latencia remota (player no disponible — no FAIL)")
+  else
+    SAMPLES=$(echo "${METRICS_JSON}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('samples',0))" 2>/dev/null || echo "0")
+    P95=$(echo "${METRICS_JSON}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('p95_ms',0))" 2>/dev/null || echo "0")
+    if [[ "${SAMPLES}" == "0" ]]; then
+      log "⚠ WARN: samples=0 — player conectando, sin muestras"
+      PASS_COUNT=$((PASS_COUNT + 1))
+      RESULTS+=("WARN: Latencia remota samples=0 (player conectando)")
+    elif (( P95 >= 700 )); then
+      fail "Latencia remota P95=${P95}ms ≥ 700ms"
+    else
+      pass "Latencia remota P95=${P95}ms < 700ms (${SAMPLES} muestras)"
+    fi
+  fi
+else
+  log "SKIP_REMOTE_LATENCY=1 — omitiendo CHECK 5"
+fi
 
 ##############################################################################
 # Resultado final
@@ -229,8 +306,13 @@ echo "║        INTEGRATION TEST — RESULT                        ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 for r in "${RESULTS[@]}"; do echo "  $r"; done
 echo ""
-echo "  PASS: ${PASS_COUNT}/4   FAIL: ${FAIL_COUNT}/4"
+echo "  PASS: ${PASS_COUNT}/${TOTAL_CHECKS}   FAIL: ${FAIL_COUNT}/${TOTAL_CHECKS}"
 echo ""
+if [[ -n "${REMOTE_PREFLIGHT_OUTPUT}" ]]; then
+  echo "  --- Preflight remoto ---"
+  echo "${REMOTE_PREFLIGHT_OUTPUT}" | sed 's/^/  /'
+  echo ""
+fi
 
 if [[ $FAIL_COUNT -eq 0 ]]; then
   echo "  ========== RESULT: PASS =========="

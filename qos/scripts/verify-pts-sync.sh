@@ -35,59 +35,52 @@ verify_overlay_sync_synthetic() {
   (
   python3 << 'OVERLAY_TEST_EOF'
 import json
-import random
-import math
 from datetime import datetime, timezone
 
 # Parámetros de test
 NUM_EVENTS = 20
 PTS_INTERVAL_MS = 500  # Intervalo entre eventos (500ms)
-JITTER_WINDOW_SIZE = 5
 MAX_DEVIATION_THRESHOLD_MS = 100
 
-# Simular histórico de deviaciones (jitter)
-# Incluye algunos eventos con buena sincronización y otros con jitter
-jitter_samples = [
-    5.2,   # Evento 1
-    -3.1,  # Evento 2
-    8.7,   # Evento 3
-    -2.4,  # Evento 4
-    6.1,   # Evento 5
+# Datos deterministas: escenario BUENO — todas las desviaciones < 100ms.
+# Verifica que el gate pasa cuando los datos son correctos.
+GOOD_DEVIATIONS = [
+    5.2, -3.1, 8.7, -2.4, 6.1, 4.5, -7.2, 9.8, -1.1, 3.3,
+    6.0, -4.5, 2.1, -8.0, 5.5, 3.7, -2.9, 7.1, -6.0, 4.2,
 ]
 
-deviations = []
-test_results = []
+# Escenario MALO — 4/20 eventos superan 100ms (20% fail rate → gate debe fallar).
+# Verifica que el gate detecta regresiones.
+BAD_DEVIATIONS = [
+    5.2, -3.1, 8.7, -2.4, 6.1, 110.5, 4.5, -7.2, 9.8, -1.1,
+    3.3, 120.0, 6.0, -4.5, 2.1, -8.0, 115.0, 3.7, -2.9, 130.1,
+]
 
-# Simular scheduling de eventos
-current_pts_ms = 0.0
-for event_idx in range(NUM_EVENTS):
-    # PTS objetivo: avanza en intervalos fijos
-    pts_target = current_pts_ms + PTS_INTERVAL_MS
-    
-    # Simular delay del scheduler con jitter gaussiano
-    # Base delay (corrección por jitter) + error de timing
-    jitter_correction = sum(jitter_samples[-JITTER_WINDOW_SIZE:]) / len(jitter_samples[-JITTER_WINDOW_SIZE:]) if jitter_samples else 0
-    
-    # Error real de timing: gaussiano, centrado en 0, std=8ms
-    timing_error = random.gauss(0, 8.0)
-    
-    # Desviación real = timing_error (corregida por histórico)
-    deviation = timing_error - jitter_correction
-    
-    deviations.append(deviation)
-    jitter_samples.append(deviation)
-    
-    # Verificar umbral
-    passes_threshold = abs(deviation) <= MAX_DEVIATION_THRESHOLD_MS
-    
-    test_results.append({
-        "event_id": f"overlay-{event_idx}",
-        "pts_target_ms": pts_target,
-        "deviation_ms": round(deviation, 2),
-        "pass": passes_threshold
-    })
-    
-    current_pts_ms = pts_target
+def run_scenario(deviations_list):
+    deviations = []
+    test_results = []
+    current_pts_ms = 0.0
+    for event_idx, deviation in enumerate(deviations_list):
+        pts_target = current_pts_ms + PTS_INTERVAL_MS
+        deviations.append(deviation)
+        passes_threshold = abs(deviation) <= MAX_DEVIATION_THRESHOLD_MS
+        test_results.append({
+            "event_id": f"overlay-{event_idx}",
+            "pts_target_ms": pts_target,
+            "deviation_ms": round(deviation, 2),
+            "pass": passes_threshold,
+        })
+        current_pts_ms = pts_target
+    return deviations, test_results
+
+# Verificar escenario malo (self-check de la lógica del test)
+bad_devs, bad_results = run_scenario(BAD_DEVIATIONS)
+bad_pass_count = sum(1 for r in bad_results if r["pass"])
+bad_pass_rate = bad_pass_count / len(bad_results)
+assert bad_pass_rate < 0.95, f"ERROR: bad-data scenario debería fallar pero pass_rate={bad_pass_rate:.2f}"
+
+# Escenario real del test: datos buenos
+deviations, test_results = run_scenario(GOOD_DEVIATIONS)
 
 # Calcular estadísticas
 abs_deviations = [abs(d) for d in deviations]
@@ -173,8 +166,7 @@ fi
 
 # Check if teremoqwow-e2e network and relay are active
 if ! docker network inspect teremoqwow-e2e &>/dev/null; then
-  echo "[PTS-SYNC] WARNING: Network 'teremoqwow-e2e' not found. Assuming offline test environment."
-  # Generate PASS report with zero deviation for offline environments
+  echo "[PTS-SYNC] WARNING: Network 'teremoqwow-e2e' not found — INCONCLUSIVE, relay requerido"
   cat > "$REPORT_FILE" <<EOF
 {
   "broadcast": "$BROADCAST",
@@ -184,16 +176,16 @@ if ! docker network inspect teremoqwow-e2e &>/dev/null; then
   "pts_deviation_ms_avg": 0,
   "pts_deviation_ms_max": 0,
   "threshold_ms": $THRESHOLD_MS,
-  "pass": true
+  "pass": false
 }
 EOF
-  echo "[PTS-SYNC] PASS"
-  exit 0
+  echo "[PTS-SYNC] FAIL: relay no disponible"
+  exit 1
 fi
 
 # Verify relay is reachable
 if ! docker run --rm --network teremoqwow-e2e moqdev/moq:0.12.7 --help &>/dev/null; then
-  echo "[PTS-SYNC] WARNING: MOQ relay not accessible. Assuming offline test environment."
+  echo "[PTS-SYNC] WARNING: MOQ relay no accesible — INCONCLUSIVE, relay requerido"
   cat > "$REPORT_FILE" <<EOF
 {
   "broadcast": "$BROADCAST",
@@ -203,11 +195,11 @@ if ! docker run --rm --network teremoqwow-e2e moqdev/moq:0.12.7 --help &>/dev/nu
   "pts_deviation_ms_avg": 0,
   "pts_deviation_ms_max": 0,
   "threshold_ms": $THRESHOLD_MS,
-  "pass": true
+  "pass": false
 }
 EOF
-  echo "[PTS-SYNC] PASS"
-  exit 0
+  echo "[PTS-SYNC] FAIL: relay no accesible"
+  exit 1
 fi
 
 echo "[PTS-SYNC] Exporting broadcast via pipe → ffprobe local (${WINDOW_SEC}s)"

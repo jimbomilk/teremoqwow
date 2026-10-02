@@ -45,25 +45,15 @@ export interface LatencyMetrics {
  */
 export function estimateNTPOffset(
   clockWallOrWallclockNs: number,
-  timescale: number = 1000000
+  _timescale: number = 1000000
 ): number {
-  // Convertir clock.wall (microsegundos) o wallclock_ns (nanosegundos) a milisegundos
-  let catalog_ms: number;
+  // clock.wall son siempre µs desde 2020-01-01T00:00:00 UTC en moq-relay.
+  // Convertir a ms Unix epoch para comparar con Date.now().
+  const EPOCH_2020_MS = 1_577_836_800_000;
+  const catalog_unix_ms = clockWallOrWallclockNs / 1000 + EPOCH_2020_MS;
 
-  if (clockWallOrWallclockNs > 1e12) {
-    // Probablemente nanosegundos (muy grande para microsegundos)
-    catalog_ms = clockWallOrWallclockNs / 1e6;
-  } else {
-    // Probablemente microsegundos, aplicar timescale
-    catalog_ms = (clockWallOrWallclockNs * 1000) / timescale;
-  }
-
-  const now_ms = performance.now();
-
-  // El offset refleja la diferencia entre el reloj NTP del servidor (catalog)
-  // y el reloj local (performance.now).
-  // Si catalog_ms > now_ms, el servidor está adelantado.
-  return catalog_ms - now_ms;
+  // Positivo si el servidor está adelantado respecto al reloj local.
+  return catalog_unix_ms - Date.now();
 }
 
 /**
@@ -74,7 +64,7 @@ export function estimateNTPOffset(
  * @returns LatencyMetrics con la latencia calculada
  */
 export function calculateLatency(frame_pts_ns: number, ntp_offset_ms: number): LatencyMetrics {
-  const render_ts_ms = performance.now();
+  const render_ts_ms = Date.now(); // Unix epoch ms, consistente con estimateNTPOffset
   const pts_ms = frame_pts_ns / 1e6;
 
   // latency_ms = (local_now - pts_remote) - offset

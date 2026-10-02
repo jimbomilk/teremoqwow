@@ -1,6 +1,7 @@
 import * as Moq from '@moq/net';
 import { Signal } from '@moq/signals';
 import * as Watch from '@moq/watch';
+import { CircularBuffer, percentile, HISTORY_SIZE } from './metrics.js';
 
 const _params = new URLSearchParams(location.search);
 if (_params.get('embed') === '1') document.body.classList.add('embed');
@@ -95,6 +96,22 @@ const latencyEl = document.getElementById('latency');
 const framesEl  = document.getElementById('frames');
 const codecEl   = document.getElementById('codec');
 
+// Metrics accumulator — feeds /metrics/latency via Vite dev plugin
+const _delayBuf = new CircularBuffer(HISTORY_SIZE);
+let _sampleCount = 0;
+
+declare global {
+  interface Window {
+    __moqMetrics: {
+      samples: number;
+      p50_ms: number | null;
+      p95_ms: number | null;
+      last_ms: number | null;
+      timestamp: string;
+    };
+  }
+}
+
 // Contador de frames real via rAF: cuenta cada frame que el renderer pinta al canvas
 let frameCount = 0;
 let lastRenderedTs: number | undefined;
@@ -156,6 +173,32 @@ setInterval(() => {
     if (latencyEl && typeof delay === 'number') {
       const jitterStr = typeof jitter === 'number' ? ` ±${Math.round(jitter)}` : '';
       latencyEl.textContent = `${Math.round(delay)}${jitterStr} ms`;
+    }
+
+    // Accumulate into circular buffer and expose metrics
+    if (typeof delay === 'number') {
+      _delayBuf.push(delay);
+      _sampleCount++;
+      const sorted = _delayBuf.toArray().sort((a, b) => a - b);
+      const metrics = {
+        samples: _sampleCount,
+        p50_ms: Math.round(percentile(sorted, 0.50)),
+        p95_ms: Math.round(percentile(sorted, 0.95)),
+        last_ms: Math.round(delay),
+        timestamp: new Date().toISOString(),
+      };
+      window.__moqMetrics = metrics;
+      // Push to Vite dev plugin (no-op in production since endpoint won't exist)
+      fetch('/metrics/latency', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metrics),
+      }).catch(() => { /* dev-only endpoint, ignore errors in production */ });
+    } else if (_sampleCount === 0) {
+      window.__moqMetrics = {
+        samples: 0, p50_ms: null, p95_ms: null, last_ms: null,
+        timestamp: new Date().toISOString(),
+      };
     }
 
     if (framesEl) framesEl.textContent = `${frameCount} · ${currentFps.toFixed(1)} fps`;

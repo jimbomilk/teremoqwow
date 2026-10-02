@@ -294,9 +294,10 @@ export class MoQWatch extends HTMLElement {
    * - Procesa votos y envía al servidor
    */
   private handleOverlayMessage(event: MessageEvent) {
-    // SEGURIDAD: Validar origen del mensaje
-    if (event.origin !== this.overlayOrigin) {
-      console.warn('[MoQWatch] Rejecting message from untrusted origin:', event.origin);
+    // SEGURIDAD: verificar que el mensaje viene del contentWindow del iframe (cubre srcdoc donde origin="null")
+    const isFromOverlay = event.source === this.overlayIframe?.contentWindow;
+    if (!isFromOverlay) {
+      console.warn('[MoQWatch] Rejecting message from untrusted source');
       return;
     }
 

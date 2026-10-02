@@ -29,6 +29,8 @@ REFRESH_TTL = int(os.environ.get("REFRESH_TOKEN_TTL", "2592000"))  # 30 días
 
 # Roles válidos del sistema
 VALID_ROLES = {"viewer", "broadcaster", "admin", "superadmin"}
+# Roles que solo un admin/superadmin autenticado puede asignar
+PRIVILEGED_ROLES = {"admin", "superadmin"}
 
 
 # ── Redis ──────────────────────────────────────────────────────────────────────
@@ -184,6 +186,14 @@ def register() -> tuple[Response, int]:
         return jsonify({"error": "email y password requeridos"}), 400
     if role not in VALID_ROLES:
         return jsonify({"error": f"rol inválido, usa: {sorted(VALID_ROLES)}"}), 400
+
+    # Gate: solo admin/superadmin autenticado puede asignar roles privilegiados
+    if role in PRIVILEGED_ROLES:
+        bearer = _get_bearer_token()
+        claims = _verify_access_token(bearer) if bearer else None
+        if not claims or claims.get("role") not in PRIVILEGED_ROLES:
+            return jsonify({"error": "se requiere token de admin para asignar roles privilegiados"}), 403
+
     if email in _users:
         return jsonify({"error": "email ya registrado"}), 409
 

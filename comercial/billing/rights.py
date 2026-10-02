@@ -41,6 +41,14 @@ _plays_store: dict[str, int] = {}
 _mem_lock = threading.Lock()
 
 
+_LUA_RECORD_PLAY = """
+local current = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+if tonumber(ARGV[2]) and current > tonumber(ARGV[2]) then return -1 end
+return current
+"""
+
+
 class RightsManager:
     """Controla cuántas reproducciones ha consumido cada suscripción."""
 
@@ -49,15 +57,12 @@ class RightsManager:
         r = _get_redis()
         if r is not None:
             try:
-                current = int(r.get(key) or 0)
-                if current >= max_plays:
-                    logger.info("max_plays_exceeded sub=%s plays=%d limit=%d",
-                                subscription_id, current, max_plays)
+                script = r.register_script(_LUA_RECORD_PLAY)
+                result = script(keys=[key], args=[_RIGHTS_TTL, max_plays])
+                if result == -1:
+                    logger.info("max_plays_exceeded sub=%s limit=%d",
+                                subscription_id, max_plays)
                     return False
-                pipe = r.pipeline()
-                pipe.incr(key)
-                pipe.expire(key, _RIGHTS_TTL)
-                pipe.execute()
                 return True
             except Exception as exc:
                 logger.error("rights: Redis error en record_play: %s", exc)

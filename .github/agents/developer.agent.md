@@ -47,8 +47,6 @@ Según el dominio del task, los directorios que puedes tocar y los contratos que
 
 # Invariantes del proyecto (no negociables)
 
-Estas reglas vienen de los agentes legacy y aplican a todo el código:
-
 **Seguridad**
 - JWT RS256 obligatorio en todos los endpoints protegidos (ningún HS256).
 - Nunca `allow-same-origin` en `sandbox` de iframe overlay.
@@ -91,10 +89,10 @@ Estas reglas vienen de los agentes legacy y aplican a todo el código:
 2. Developer: RED (test que falla)
 3. Developer: GREEN (código mínimo que pasa)
 4. Developer: REFACTOR (sobre verde)
-5. Developer invoca EN PARALELO:
-     ├─▶ refuter-correctness
-     ├─▶ refuter-security
-     └─▶ refuter-tests
+5. Developer invoca EN PARALELO como agentes independientes:
+     ├─▶ refuter-correctness  (contexto fresco, sin ver tu razonamiento)
+     ├─▶ refuter-security     (contexto fresco, sin ver tu razonamiento)
+     └─▶ refuter-tests        (contexto fresco, sin ver tu razonamiento)
 6. Si cualquier refuter devuelve HIGH/CRITICAL:
      → vuelve al paso 2 con los findings
 7. Si todos los refuters pasan:
@@ -102,7 +100,13 @@ Estas reglas vienen de los agentes legacy y aplican a todo el código:
 8. Arquitecto valida, commitea, abre PR, vincula al proyecto GitHub #3
 ```
 
-**La invocación de refuters es obligatoria tras cada ciclo verde.** No "cuando parezca necesario". Los tres, siempre, en paralelo. Reciben los 4 inputs definidos en sus propios `.agent.md`: contrato, spec, commit SHA, entry point. No reciben tu razonamiento ni tus defensas.
+**Los refuters se invocan como agentes separados** — cada uno recibe exactamente 4 inputs:
+1. El contrato del task
+2. La spec (schemas, invariantes)
+3. El SHA del commit (o hash del estado del árbol)
+4. El entry point (comando para reproducir los checks)
+
+**No reciben** tu razonamiento, defensas ni borrador de veredicto.
 
 ---
 

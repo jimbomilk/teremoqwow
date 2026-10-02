@@ -18,6 +18,10 @@ if [[ -z "$MATCH_ID" ]]; then
     echo "[ADAPTER] ERROR: MATCH_ID is required" >&2
     exit 1
 fi
+if [[ ! "$MATCH_ID" =~ ^[a-zA-Z0-9_-]{1,64}$ ]]; then
+    echo "[ADAPTER] ERROR: MATCH_ID contains invalid characters (allowed: [a-zA-Z0-9_-], max 64 chars)" >&2
+    exit 1
+fi
 
 # State
 SEQ=0
@@ -54,26 +58,27 @@ while true; do
     
     # Generate canonical telemetry event
     WALLCLOCK_NS=$(($(date +%s%N)))
-    EVENT_JSON=$(python3 << PYTHON_EOF
+    EVENT_JSON=$(BODY_JSON="$BODY" MATCH_ID_VAL="$MATCH_ID" SEQ_VAL="$SEQ" WALLCLOCK_VAL="$WALLCLOCK_NS" python3 << 'PYTHON_EOF'
 import json
 import uuid
 import sys
+import os
 
 try:
-    api_response = json.loads('''$BODY''')
-except:
+    api_response = json.loads(os.environ['BODY_JSON'])
+except Exception:
     sys.exit(1)
 
 event = {
     "id": str(uuid.uuid4()),
     "timestamp": {
-        "wallclock_ns": int($WALLCLOCK_NS),
+        "wallclock_ns": int(os.environ['WALLCLOCK_VAL']),
         "source": "app"
     },
     "kind": "stats.match",
     "source": "stats-perform",
-    "producer_id": "$MATCH_ID",
-    "sequence": $SEQ,
+    "producer_id": os.environ['MATCH_ID_VAL'],
+    "sequence": int(os.environ['SEQ_VAL']),
     "payload": {
         "matchId": api_response.get("matchId"),
         "homeTeam": api_response.get("homeTeam"),
