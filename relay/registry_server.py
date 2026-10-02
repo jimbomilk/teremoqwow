@@ -43,6 +43,12 @@ JWT_TTL = 86400  # 24 h
 _RATE_LIMIT = 5
 _RATE_WINDOW = 60  # segundos
 
+# Solo se acepta X-Forwarded-For de IPs de conexión que estén en esta lista.
+# Vacío (por defecto) → siempre se usa la IP directa.
+_TRUSTED_PROXIES: set[str] = set(
+    filter(None, os.environ.get("TRUSTED_PROXIES", "").split(","))
+)
+
 
 def _load_schema(name: str) -> dict:
     with open(os.path.join(_SCHEMA_DIR, name)) as fh:
@@ -127,11 +133,13 @@ class RegistryHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _client_ip(self) -> str:
-        # Respeta X-Forwarded-For cuando KrakenD actúa como proxy
-        forwarded = self.headers.get("X-Forwarded-For", "")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return self.client_address[0]
+        real_ip: str = self.client_address[0]
+        # Solo confiar en X-Forwarded-For si la IP de conexión es un proxy conocido.
+        if real_ip in _TRUSTED_PROXIES:
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+        return real_ip
 
     def do_GET(self) -> None:
         if self.path == "/health":

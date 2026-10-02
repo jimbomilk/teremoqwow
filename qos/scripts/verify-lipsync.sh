@@ -104,10 +104,10 @@ PYTHON_EOF
 
 # Verificar disponibilidad del relay
 if ! check_relay; then
-  warn "relay no disponible — usando offset 0ms (entorno sin pipeline activa)"
-  generate_report "0" "0" "true"
-  log "PASS (relay unavailable, defaulting to 0ms)"
-  exit 0
+  warn "relay no disponible — INCONCLUSIVE, no se puede medir lip-sync"
+  generate_report "0" "0" "false"
+  log "FAIL: relay unavailable — sin relay no hay PASS posible"
+  exit 1
 fi
 
 log "Exporting MoQ stream via pipe → ffprobe (${WINDOW_SEC}s)..."
