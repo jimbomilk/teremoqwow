@@ -29,6 +29,7 @@ WINDOW_SEC="${WINDOW_SEC:-15}"
 SKIP_NETEM="${SKIP_NETEM:-0}"
 SKIP_REMOTE_CHECK="${SKIP_REMOTE_CHECK:-0}"
 SKIP_REMOTE_LATENCY="${SKIP_REMOTE_LATENCY:-0}"
+SKIP_CERT_CHECK="${SKIP_CERT_CHECK:-0}"
 PLAYER_HOST="${PLAYER_HOST:-laptop-077c92vt.tailbd33d7.ts.net}"
 PLAYER_PORT="${PLAYER_PORT:-5443}"
 
@@ -66,6 +67,26 @@ if ! docker network ls | grep -q "$DOCKER_NET"; then
   echo "[INTEGRATION] ERROR: red '$DOCKER_NET' no encontrada. Inicia la pipeline primero." >&2
   exit 1
 fi
+
+# ── Cert expiry check (salteable en CI con SKIP_CERT_CHECK=1) ──────────────
+if [[ "${SKIP_CERT_CHECK}" == "0" ]]; then
+  WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  for _cert_rel in "config/relay/certs/relay.pem" "config/relay/certs/player.pem"; do
+    _cert_path="${WORKSPACE_ROOT}/${_cert_rel}"
+    [[ ! -f "$_cert_path" ]] && continue
+    _end_date=$(openssl x509 -enddate -noout -in "$_cert_path" 2>/dev/null | cut -d= -f2-)
+    _expiry_epoch=$(date -d "$_end_date" +%s 2>/dev/null) || { log "WARN: no se pudo parsear fecha de ${_cert_rel}"; continue; }
+    _now_epoch=$(date +%s)
+    _days_left=$(( (_expiry_epoch - _now_epoch) / 86400 ))
+    if (( _days_left < 0 )); then
+      fail "cert caducado: ${_cert_rel} (expiró hace $(( -_days_left )) días)"
+      exit 1
+    elif (( _days_left <= 3 )); then
+      log "WARN: cert ${_cert_rel} expira en ${_days_left} días — ejecuta scripts/renew-dev-certs.sh"
+    fi
+  done
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -q "^${RELAY_HOST}$"; then
   echo "[INTEGRATION] ERROR: contenedor '${RELAY_HOST}' no está corriendo." >&2
   exit 1
