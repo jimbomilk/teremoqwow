@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v2/overlay-payload.json",
+  "title": "OverlayPayload v2",
+  "description": "Motor de overlays completo — instrucción publicada en el track MoQ 'overlay' sincronizada con el PTS del vídeo. Soporta 12 tipos de elementos visuales, posicionamiento por zona, animaciones y generación por LLM.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "timestamp", "duration_ms", "zone", "template_id"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador único del overlay. Usado para unpublish y deduplicación."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "poll",
+        "logo",
+        "banner",
+        "lower-third",
+        "scoreboard",
+        "stats",
+        "ad",
+        "ticker",
+        "countdown",
+        "image",
+        "video-clip",
+        "custom-html",
+        "llm-generated"
+      ],
+      "description": "Tipo semántico del overlay. Determina el template por defecto y las validaciones de 'data'."
+    },
+    "timestamp": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json",
+      "description": "PTS del vídeo en el que debe aparecer el overlay. Si null, se muestra inmediatamente."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Duración en ms. 0 = persistente hasta unpublish explícito."
+    },
+    "zone": {
+      "type": "string",
+      "enum": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "middle-left",
+        "center",
+        "middle-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right",
+        "bottom-bar",
+        "top-bar",
+        "full"
+      ],
+      "default": "bottom-bar",
+      "description": "Zona del canvas donde se renderiza el overlay. El motor evita colisiones entre zonas."
+    },
+    "template_id": {
+      "type": "string",
+      "description": "Identificador del template HTML+CSS. Debe existir en overlays/templates/{template_id}/index.html.",
+      "examples": [
+        "logo-corner",
+        "banner-bottom",
+        "lower-third",
+        "scoreboard-sport",
+        "stats-bar",
+        "ad-countdown",
+        "ticker-news",
+        "countdown-clock",
+        "poll-interactive",
+        "image-overlay",
+        "sponsor-banner",
+        "custom-html"
+      ]
+    },
+    "z_index": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 999,
+      "default": 100,
+      "description": "Orden de apilamiento. Mayor valor = por encima de otros overlays."
+    },
+    "animation": {
+      "type": "string",
+      "enum": ["none", "fade", "slide-up", "slide-down", "slide-left", "slide-right", "pop", "typewriter"],
+      "default": "fade",
+      "description": "Animación de entrada. La salida siempre es fade-out."
+    },
+    "data": {
+      "type": "object",
+      "description": "Variables inyectadas en el template. El schema específico depende del kind.",
+      "oneOf": [
+        { "$ref": "#/$defs/PollData" },
+        { "$ref": "#/$defs/LogoData" },
+        { "$ref": "#/$defs/BannerData" },
+        { "$ref": "#/$defs/LowerThirdData" },
+        { "$ref": "#/$defs/ScoreboardData" },
+        { "$ref": "#/$defs/StatsData" },
+        { "$ref": "#/$defs/AdData" },
+        { "$ref": "#/$defs/TickerData" },
+        { "$ref": "#/$defs/CountdownData" },
+        { "$ref": "#/$defs/ImageData" },
+        { "$ref": "#/$defs/VideoClipData" },
+        { "$ref": "#/$defs/CustomHtmlData" },
+        { "$ref": "#/$defs/LlmGeneratedData" }
+      ]
+    },
+    "style_overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Overrides de estilo con whitelist explícita — no CSS libre.",
+      "properties": {
+        "bg_color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$|^rgba?\\(",
+          "description": "Color de fondo. Hex o rgba()."
+        },
+        "text_color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$|^rgba?\\("
+        },
+        "accent_color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$|^rgba?\\("
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "border_radius": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Border radius en px."
+        },
+        "font_size": {
+          "type": "string",
+          "enum": ["xs", "sm", "md", "lg", "xl", "2xl"],
+          "default": "md"
+        },
+        "width_pct": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 100,
+          "description": "Ancho del overlay como porcentaje del canvas."
+        }
+      }
+    },
+    "click_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["none", "link", "poll", "interaction", "dismiss"]
+        },
+        "href": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL destino si type=link. Solo HTTPS."
+        },
+        "poll_id": {
+          "type": "string",
+          "description": "ID del poll a abrir si type=poll."
+        },
+        "interaction_kind": {
+          "type": "string",
+          "description": "Kind de InteractionCreate a enviar si type=interaction."
+        }
+      },
+      "default": { "type": "none" }
+    },
+    "llm_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Presente solo en overlays generados por LLM. Requiere revisión humana antes de publicar.",
+      "properties": {
+        "prompt": { "type": "string", "maxLength": 500 },
+        "model": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "explanation": { "type": "string" },
+        "reviewed_by": { "type": "string", "description": "Email del operador que aprobó." },
+        "reviewed_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "PollData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "options", "duration_ms"],
+      "properties": {
+        "question": { "type": "string", "maxLength": 200 },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": ["id", "text"],
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string", "maxLength": 100 },
+              "image_url": { "type": "string", "format": "uri" }
+            }
+          }
+        },
+        "duration_ms": { "type": "integer", "minimum": 5000 },
+        "show_results": { "type": "boolean", "default": true },
+        "allow_change": { "type": "boolean", "default": false }
+      }
+    },
+    "LogoData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_url"],
+      "properties": {
+        "image_url": { "type": "string", "format": "uri", "description": "PNG/SVG/WebP con transparencia." },
+        "alt": { "type": "string" },
+        "link_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "BannerData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "maxLength": 300 },
+        "subtext": { "type": "string", "maxLength": 150 },
+        "image_url": { "type": "string", "format": "uri" },
+        "cta_text": { "type": "string", "maxLength": 30 },
+        "cta_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "LowerThirdData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "maxLength": 80, "description": "Nombre o título principal." },
+        "subtitle": { "type": "string", "maxLength": 60 },
+        "logo_url": { "type": "string", "format": "uri" },
+        "accent": { "type": "string", "description": "Color de acento del lower-third." }
+      }
+    },
+    "ScoreboardData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["home_name", "away_name", "home_score", "away_score"],
+      "properties": {
+        "home_name": { "type": "string", "maxLength": 30 },
+        "away_name": { "type": "string", "maxLength": 30 },
+        "home_score": { "type": "integer", "minimum": 0 },
+        "away_score": { "type": "integer", "minimum": 0 },
+        "home_logo_url": { "type": "string", "format": "uri" },
+        "away_logo_url": { "type": "string", "format": "uri" },
+        "period": { "type": "string", "description": "Ej: '2T', '67\\'' , 'Q3'." },
+        "clock": { "type": "string", "description": "Reloj de juego, ej: '67:23'." },
+        "sport": {
+          "type": "string",
+          "enum": ["football", "basketball", "tennis", "baseball", "hockey", "generic"],
+          "default": "generic"
+        }
+      }
+    },
+    "StatsData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "items"],
+      "properties": {
+        "title": { "type": "string", "maxLength": 60 },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string", "maxLength": 40 },
+              "value": { "type": ["string", "number"] },
+              "bar_pct": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Si presente, dibuja una barra de progreso."
+              },
+              "trend": { "type": "string", "enum": ["up", "down", "flat"] }
+            }
+          }
+        }
+      }
+    },
+    "AdData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["advertiser", "image_url"],
+      "properties": {
+        "advertiser": { "type": "string", "maxLength": 60 },
+        "image_url": { "type": "string", "format": "uri" },
+        "video_url": { "type": "string", "format": "uri" },
+        "cta_text": { "type": "string", "maxLength": 30, "default": "Saber más" },
+        "cta_url": { "type": "string", "format": "uri" },
+        "countdown_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Segundos hasta que el viewer puede saltar el anuncio. 0 = no saltable."
+        },
+        "skip_text": { "type": "string", "default": "Saltar" }
+      }
+    },
+    "TickerData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string", "maxLength": 200 },
+              "prefix": { "type": "string", "maxLength": 20 },
+              "image_url": { "type": "string", "format": "uri" }
+            }
+          }
+        },
+        "speed": {
+          "type": "string",
+          "enum": ["slow", "normal", "fast"],
+          "default": "normal"
+        },
+        "loop": { "type": "boolean", "default": true }
+      }
+    },
+    "CountdownData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_iso"],
+      "properties": {
+        "target_iso": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha/hora destino en ISO 8601 UTC."
+        },
+        "label": { "type": "string", "maxLength": 60, "description": "Ej: 'Inicio en'" },
+        "completed_text": { "type": "string", "default": "¡Ya comenzó!", "maxLength": 60 },
+        "show_days": { "type": "boolean", "default": true },
+        "show_hours": { "type": "boolean", "default": true }
+      }
+    },
+    "ImageData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_url"],
+      "properties": {
+        "image_url": { "type": "string", "format": "uri" },
+        "alt": { "type": "string" },
+        "caption": { "type": "string", "maxLength": 120 },
+        "fit": {
+          "type": "string",
+          "enum": ["contain", "cover", "fill"],
+          "default": "contain"
+        }
+      }
+    },
+    "VideoClipData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["video_url"],
+      "properties": {
+        "video_url": { "type": "string", "format": "uri" },
+        "muted": { "type": "boolean", "default": true },
+        "loop": { "type": "boolean", "default": false },
+        "autoplay": { "type": "boolean", "default": true }
+      }
+    },
+    "CustomHtmlData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["html"],
+      "properties": {
+        "html": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "HTML sanitizado server-side. Solo etiquetas de la whitelist: div, span, p, img, a, ul, li, h1-h6, strong, em, code."
+        },
+        "css": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "CSS adicional. Scoped al iframe sandbox automáticamente."
+        }
+      }
+    },
+    "LlmGeneratedData": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Datos generados por LLM. El motor normaliza al template_id seleccionado. Siempre requiere revisión humana (reviewed_by en llm_metadata).",
+      "properties": {
+        "raw_response": { "type": "string" },
+        "normalized": { "type": "object" }
+      }
+    }
+  }
+}
