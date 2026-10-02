@@ -12,7 +12,7 @@
 #
 # Criterio de aceptación:
 #   - P95 latencia ≤ 700ms
-#   - ≥ 1000 muestras
+#   - ≥ 500 muestras (DURATION ≥ 300s) o ≥ 20 muestras (DURATION < 60s, CI rápido)
 #   Exit code: 0 = PASS, 1 = FAIL, 2 = INCONCLUSIVE
 #
 ################################################################################
@@ -35,9 +35,13 @@ PLAYER_PORT="${PLAYER_PORT:-5173}"
 PLAYER_METRICS_URL="http://${PLAYER_HOST}:${PLAYER_PORT}/metrics/latency"
 
 P95_THRESHOLD_MS=700
-# En entorno docker con buffering el pipe entrega ~2 fps a shell. 20 muestras
-# en 15s es suficiente para percentiles orientativos.
-MIN_SAMPLES="${MIN_SAMPLES:-20}"
+# MIN_SAMPLES depende de DURATION: runs cortos de CI (<60s) aceptan 20 muestras
+# (≈2 fps vía CLI). Runs completos (≥300s) exigen 500 muestras mínimo estadístico.
+if [[ "${DURATION}" -ge 300 ]]; then
+  MIN_SAMPLES="${MIN_SAMPLES:-500}"
+else
+  MIN_SAMPLES="${MIN_SAMPLES:-20}"
+fi
 
 # Colors for output
 RED='\033[0;31m'

@@ -57,7 +57,8 @@ class MochaValidator:
                 token,
                 self._public_key,
                 algorithms=["RS256"],
-                options={"verify_exp": True},
+                issuer=self._issuer,
+                options={"require": ["iss", "exp"], "verify_exp": True},
             )
         except jwt.ExpiredSignatureError as exc:
             raise MochaValidationError("Token MOCHA expirado") from exc
