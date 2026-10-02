@@ -135,3 +135,31 @@ de ejecutarla, pero cualquier agente que cree un issue o PR debe recordarlo.
 # Vincular un issue o PR al proyecto:
 gh project item-add 3 --owner jimbomilk --url <url_del_issue_o_pr>
 ```
+
+## Flujo de desarrollo obligatorio — Arquitecto → developer → refuters
+
+A partir del 2026-10-02, **todo el desarrollo** del proyecto `teremoqwow` sigue el flujo
+definido en [`.github/agents/developer.agent.md`](.github/agents/developer.agent.md):
+
+```
+Arquitecto (contratos en schemas/)
+    ▼
+developer (TDD RED→GREEN→REFACTOR, un task a la vez)
+    ▼
+refuter-correctness + refuter-security + refuter-tests  (en paralelo, siempre los 3)
+    ▼
+Arquitecto (git/GitHub, vincula al proyecto #3)
+```
+
+**Reglas invariantes:**
+
+- Los antiguos agentes de dominio (`media-pipeline`, `moq-core`, `player-overlay`,
+  `sync-telemetry`, `data-adapters`, `monetization-drm`, `client-portal`) están
+  **archivados en `.github/agents/_legacy/`**. No se invocan. Su conocimiento se ha
+  consolidado en `developer.agent.md` (matriz de dominios + invariantes).
+- El `developer` **nunca toca `schemas/`** — competencia exclusiva del Arquitecto.
+- El `developer` **nunca ejecuta `git commit`, `git push`, `gh pr/issue create`** —
+  competencia exclusiva del Arquitecto.
+- Los **3 refuters** se invocan **en paralelo tras cada ciclo verde** del developer. No
+  son opcionales. Si cualquiera devuelve HIGH/CRITICAL, el developer corrige y vuelve
+  a invocarlos antes de entregar.
