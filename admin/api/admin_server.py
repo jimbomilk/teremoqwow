@@ -763,6 +763,124 @@ def revoke_subscription_jwt(sub_id: str):
     return jsonify({"status": "revoked", "subscription_id": sub_id}), 200
 
 
+# ── MÓDULO: DRM — Configuración EZDRM ────────────────────────────────────────
+
+# Estado en memoria: mapa content_id → config de protección
+_drm_content_config: dict[str, dict] = {}
+
+# Estado en memoria: reglas de geobloqueo por contenido
+_drm_geo_rules: dict[str, list[str]] = {}
+
+
+@app.route("/admin/drm/config", methods=["GET"])
+def get_drm_config():
+    """Devuelve configuración EZDRM (sin credenciales; solo estado operativo)."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    return jsonify({
+        "stub_mode": not bool(os.environ.get("EZDRM_USERNAME")),
+        "api_base_url": os.environ.get("EZDRM_API_BASE_URL", "https://cpix.ezdrm.com"),
+        "whitelabel_id_set": bool(os.environ.get("EZDRM_WHITELABEL_ID")),
+        "credentials_set": bool(os.environ.get("EZDRM_USERNAME")),
+        "request_timeout": int(os.environ.get("EZDRM_REQUEST_TIMEOUT", "10")),
+    }), 200
+
+
+@app.route("/admin/drm/content", methods=["GET"])
+def list_drm_content():
+    """Lista todos los content_ids con configuración DRM."""
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify(list(_drm_content_config.values())), 200
+
+
+@app.route("/admin/drm/content", methods=["POST"])
+def create_drm_content():
+    """Registra un content_id con su sistema DRM y ventanas de disponibilidad."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    content_id = body.get("content_id", "").strip()
+    drm_system = body.get("drm_system", "widevine")
+    if not content_id:
+        return jsonify({"error": "content_id requerido"}), 400
+    if drm_system not in ("widevine", "playready", "fairplay"):
+        return jsonify({"error": "drm_system debe ser widevine, playready o fairplay"}), 400
+    windows = body.get("availability_windows", [])
+    for w in windows:
+        if "start_time" not in w or "end_time" not in w:
+            return jsonify({"error": "availability_windows requiere start_time y end_time"}), 400
+    entry = {
+        "content_id": content_id,
+        "drm_system": drm_system,
+        "availability_windows": windows,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    _drm_content_config[content_id] = entry
+    _audit(claims, "drm_content_create", content_id)
+    return jsonify(entry), 201
+
+
+@app.route("/admin/drm/content/<content_id>", methods=["DELETE"])
+def delete_drm_content(content_id: str):
+    claims, err = _require_role(*ADMIN_ROLES)
+    if err: return err
+    if content_id not in _drm_content_config:
+        return jsonify({"error": "content_id no encontrado"}), 404
+    del _drm_content_config[content_id]
+    _audit(claims, "drm_content_delete", content_id)
+    return jsonify({"status": "deleted", "content_id": content_id}), 200
+
+
+@app.route("/admin/drm/geo-rules", methods=["GET"])
+def list_geo_rules():
+    """Lista reglas de geobloqueo por content_id."""
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    return jsonify([
+        {"content_id": cid, "blocked_regions": regions}
+        for cid, regions in _drm_geo_rules.items()
+    ]), 200
+
+
+@app.route("/admin/drm/geo-rules", methods=["POST"])
+def set_geo_rule():
+    """Define regiones bloqueadas para un content_id (reemplaza regla existente)."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    content_id = body.get("content_id", "").strip()
+    regions = body.get("blocked_regions", [])
+    if not content_id:
+        return jsonify({"error": "content_id requerido"}), 400
+    import re
+    invalid = [r for r in regions if not re.match(r'^[A-Z]{2}$', r)]
+    if invalid:
+        return jsonify({"error": f"códigos ISO 3166-1 inválidos: {invalid}"}), 400
+    _drm_geo_rules[content_id] = regions
+    _audit(claims, "drm_geo_rule_set", f"{content_id}:{','.join(regions)}")
+    return jsonify({"content_id": content_id, "blocked_regions": regions}), 200
+
+
+@app.route("/admin/drm/geo-rules/<content_id>", methods=["DELETE"])
+def delete_geo_rule(content_id: str):
+    claims, err = _require_role(*ADMIN_ROLES)
+    if err: return err
+    _drm_geo_rules.pop(content_id, None)
+    _audit(claims, "drm_geo_rule_delete", content_id)
+    return jsonify({"status": "deleted", "content_id": content_id}), 200
+
+
+@app.route("/admin/drm/license-log", methods=["GET"])
+def drm_license_log():
+    """Devuelve últimas N entradas de auditoría relacionadas con DRM."""
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    limit = min(int(request.args.get("limit", 50)), 200)
+    drm_entries = [e for e in _audit_log if "drm" in e.get("action", "") or "revoke_jwt" in e.get("action", "")]
+    return jsonify(drm_entries[-limit:][::-1]), 200
+
+
 # ── MÓDULO: Monetización ──────────────────────────────────────────────────────
 
 @app.route("/admin/monetization/stats", methods=["GET"])
