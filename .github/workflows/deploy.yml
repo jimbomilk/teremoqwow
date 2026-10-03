@@ -87,9 +87,13 @@ jobs:
           port: 22
           timeout: 600s
           script: |
-            set -euo pipefail
+            set -eo pipefail
             REPO_DIR=/opt/teremoqwow
-            set -a; source /home/deploy/.env; set +a
+            # Cargar .env ignorando errores de sintaxis y líneas de comentarios
+            while IFS='=' read -r k v; do
+              [[ "$k" =~ ^#.*$ || -z "$k" ]] && continue
+              export "$k"="$v" 2>/dev/null || true
+            done < /home/deploy/.env
             COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
 
             echo "=== [1/4] Actualizar código ==="
