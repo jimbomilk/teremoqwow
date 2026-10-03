@@ -1,0 +1,294 @@
+# teremoqwow — stack de producción (Vultr)
+# Uso: docker compose -f docker-compose.prod.yml up -d
+# Prerrequisitos en el servidor:
+#   - /etc/teremoqwow/.env (ver .env.example)
+#   - /etc/letsencrypt/live/<DOMAIN>/{fullchain,privkey}.pem
+#   - Red externa teremoqwow-prod: docker network create teremoqwow-prod
+
+networks:
+  teremoqwow-prod:
+    external: true
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+  clickhouse-data:
+
+services:
+
+  # ── MoQ Relay ──────────────────────────────────────────────────────────────
+  moq-relay:
+    image: moqdev/moq-relay:0.15.7
+    networks: [teremoqwow-prod]
+    ports:
+      - "4443:4443/udp"
+      - "4443:4443/tcp"
+      - "4444:4444"
+    volumes:
+      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/certs/relay.pem:ro
+      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/certs/relay.key:ro
+    command: >
+      --listen [::]:4443
+      --listen-tls-cert /certs/relay.pem
+      --listen-tls-key /certs/relay.key
+      --listen-tcp-bind [::]:4444
+      --auth-public "anon/**"
+      --web-http-listen [::]:8090
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── KrakenD API Gateway ────────────────────────────────────────────────────
+  krakend:
+    image: devopsfaith/krakend:2.6
+    networks: [teremoqwow-prod]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/krakend/krakend.json:/etc/krakend/krakend.json:ro
+    environment:
+      KRAKEND_CONFIG: /etc/krakend/krakend.json
+    depends_on:
+      billing-webhook:
+        condition: service_healthy
+      registry-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Billing Webhook ────────────────────────────────────────────────────────
+  billing-webhook:
+    build:
+      context: ./comercial/billing
+      dockerfile: Dockerfile
+    networks: [teremoqwow-prod]
+    env_file: /etc/teremoqwow/.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Registry Server ────────────────────────────────────────────────────────
+  registry-server:
+    build:
+      context: ./relay
+      dockerfile: Dockerfile
+    networks: [teremoqwow-prod]
+    env_file: /etc/teremoqwow/.env
+    volumes:
+      - ./schemas:/schemas:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  auth:
+    build:
+      context: ./comercial/auth
+      dockerfile: Dockerfile
+    networks: [teremoqwow-prod]
+    env_file: /etc/teremoqwow/.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Portal Cliente ────────────────────────────────────────────────────────
+  portal:
+    build:
+      context: ./comercial/portal
+      dockerfile: Dockerfile
+    networks: [teremoqwow-prod]
+    env_file: /etc/teremoqwow/.env
+    depends_on:
+      auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Player (Vite build → nginx) ───────────────────────────────────────────
+  player:
+    build:
+      context: ./player
+      dockerfile: Dockerfile
+      target: prod
+    networks: [teremoqwow-prod]
+    environment:
+      VITE_MOQ_RELAY_URL: wss://${DOMAIN}:4443/anon
+      VITE_RELAY_BROADCAST: anon/live1
+    depends_on:
+      moq-relay:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "2" }
+
+  # ── Admin API ─────────────────────────────────────────────────────────────
+  admin-api:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      target: api
+    networks: [teremoqwow-prod]
+    env_file: /etc/teremoqwow/.env
+    volumes:
+      - ./overlays/templates:/app/overlays/templates:ro
+    depends_on:
+      auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Admin Frontend ────────────────────────────────────────────────────────
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      target: frontend
+    networks: [teremoqwow-prod]
+    depends_on:
+      admin-api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "2" }
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    networks: [teremoqwow-prod]
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "2" }
+
+  # ── ClickHouse ─────────────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    networks: [teremoqwow-prod]
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./config/clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    env_file: /etc/teremoqwow/.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    networks: [teremoqwow-prod]
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.enable-lifecycle
+      - --web.listen-address=:9090
+    depends_on:
+      moq-relay:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "2" }
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    networks: [teremoqwow-prod]
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    env_file: /etc/teremoqwow/.env
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "2" }
+
+  # ── nginx reverse proxy ────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    networks: [teremoqwow-prod]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      - player
+      - admin
+      - krakend
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
