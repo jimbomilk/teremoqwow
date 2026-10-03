@@ -3,29 +3,81 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: "Forzar deploy completo de todos los servicios"
+        type: boolean
+        default: false
 
-# Solo un deploy a la vez
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
+  # ── Detectar qué servicios cambiaron ─────────────────────────────────────────
+  detect:
+    name: detect-changes
+    runs-on: ubuntu-latest
+    outputs:
+      auth:     ${{ steps.f.outputs.auth }}
+      billing:  ${{ steps.f.outputs.billing }}
+      portal:   ${{ steps.f.outputs.portal }}
+      registry: ${{ steps.f.outputs.registry }}
+      admin:    ${{ steps.f.outputs.admin }}
+      player:   ${{ steps.f.outputs.player }}
+      infra:    ${{ steps.f.outputs.infra }}
+      config:   ${{ steps.f.outputs.config }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            auth:
+              - 'comercial/auth/**'
+            billing:
+              - 'comercial/billing/**'
+            portal:
+              - 'comercial/portal/**'
+            registry:
+              - 'relay/**'
+            admin:
+              - 'admin/**'
+            player:
+              - 'player/**'
+            infra:
+              - 'docker-compose.prod.yml'
+              - 'config/nginx/**'
+              - '.github/workflows/deploy.yml'
+            config:
+              - 'config/krakend/**'
+              - 'config/prometheus/**'
+              - 'schemas/**'
+              - 'overlays/**'
+
+  # ── Deploy selectivo ──────────────────────────────────────────────────────────
   deploy:
     name: deploy
+    needs: detect
     runs-on: ubuntu-latest
-    # Solo despliega si el CI pasó en el mismo commit
-    needs: []           # sin needs: el CD corre en paralelo con CI
-    # Para forzar que CI pase antes, usar: needs: [schema-validate, tests-python, tests-typescript]
-    # y mover este job al ci.yml como job separado con needs.
-    # Se mantiene en archivo separado para poder re-lanzar deploys sin re-correr tests.
-
     steps:
+      - uses: actions/checkout@v7
 
-      # ── 1. Obtener el SHA del commit ─────────────────────────────────────────
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Resumen de cambios detectados
+        run: |
+          echo "auth=${{ needs.detect.outputs.auth }}"
+          echo "billing=${{ needs.detect.outputs.billing }}"
+          echo "portal=${{ needs.detect.outputs.portal }}"
+          echo "registry=${{ needs.detect.outputs.registry }}"
+          echo "admin=${{ needs.detect.outputs.admin }}"
+          echo "player=${{ needs.detect.outputs.player }}"
+          echo "infra=${{ needs.detect.outputs.infra }}"
+          echo "config=${{ needs.detect.outputs.config }}"
+          echo "force_full=${{ github.event.inputs.force_full }}"
 
-      # ── 2. SSH al servidor y desplegar ───────────────────────────────────────
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -33,59 +85,69 @@ jobs:
           username: deploy
           key: ${{ secrets.PROD_SSH_KEY }}
           port: 22
-          timeout: 300s
+          timeout: 600s
           script: |
             set -euo pipefail
-
             REPO_DIR=/opt/teremoqwow
-            export DOMAIN=wow.teremoq.com
-            # Cargar el .env en el entorno del proceso para que compose lo herede
             set -a; source /home/deploy/.env; set +a
             COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
 
-            echo "=== [1/5] Actualizar código ==="
+            echo "=== [1/4] Actualizar código ==="
             cd $REPO_DIR
             git fetch origin main
+            PREV_SHA=$(git rev-parse --short HEAD)
             git reset --hard origin/main
+            NEW_SHA=$(git rev-parse --short HEAD)
+            echo "  $PREV_SHA -> $NEW_SHA"
 
-            echo "=== [2/5] Guardar imagen actual para rollback ==="
-            PREV_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep teremoqwow || true)
+            # Variables inyectadas por env: del step
+            FORCE_FULL=${FORCE_FULL:-false}
+            BUILD_SERVICES=""
+            RESTART_SERVICES=""
 
-            echo "=== [3/5] Build ==="
-            $COMPOSE build --parallel --quiet
+            if [ "$FORCE_FULL" = "true" ]; then
+              echo "=== Forzando deploy completo ==="
+              BUILD_SERVICES="auth billing-webhook portal registry-server admin-api admin player"
+              RESTART_SERVICES="redis clickhouse moq-relay krakend nginx prometheus grafana"
+            else
+              [ "${CHANGED_AUTH:-false}"     = "true" ] && BUILD_SERVICES="$BUILD_SERVICES auth"
+              [ "${CHANGED_BILLING:-false}"  = "true" ] && BUILD_SERVICES="$BUILD_SERVICES billing-webhook"
+              [ "${CHANGED_PORTAL:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES portal"
+              [ "${CHANGED_REGISTRY:-false}" = "true" ] && BUILD_SERVICES="$BUILD_SERVICES registry-server"
+              [ "${CHANGED_ADMIN:-false}"    = "true" ] && BUILD_SERVICES="$BUILD_SERVICES admin-api admin"
+              [ "${CHANGED_PLAYER:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES player"
+              [ "${CHANGED_INFRA:-false}"    = "true" ] && RESTART_SERVICES="$RESTART_SERVICES nginx"
+              [ "${CHANGED_CONFIG:-false}"   = "true" ] && RESTART_SERVICES="$RESTART_SERVICES krakend prometheus grafana"
+            fi
 
-            echo "=== [4/5] Deploy sin downtime (rolling) ==="
-            # Servicios sin estado primero
-            $COMPOSE up -d --no-deps redis clickhouse
-            sleep 5
-            # Servicios de aplicación
-            $COMPOSE up -d --no-deps auth billing-webhook registry-server
-            sleep 5
-            $COMPOSE up -d --no-deps portal admin-api
-            sleep 5
-            # Gateway y frontend
-            $COMPOSE up -d --no-deps krakend player admin
-            sleep 5
-            # Relay y nginx al final
-            $COMPOSE up -d --no-deps moq-relay nginx prometheus grafana
+            BUILD_SERVICES=$(echo $BUILD_SERVICES | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+            ALL_RESTART=$(echo "$BUILD_SERVICES $RESTART_SERVICES" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
 
-            echo "=== [5/5] Health check ==="
-            sleep 15
+            if [ -z "$ALL_RESTART" ]; then
+              echo "Sin cambios relevantes para produccion. Skip."
+              exit 0
+            fi
+
+            echo "=== [2/4] Build: ${BUILD_SERVICES:-ninguno} ==="
+            if [ -n "$BUILD_SERVICES" ]; then
+              $COMPOSE build --parallel $BUILD_SERVICES
+            fi
+
+            echo "=== [3/4] Restart: $ALL_RESTART ==="
+            for svc in $ALL_RESTART; do
+              $COMPOSE up -d --no-deps $svc && echo "  OK $svc" || echo "  WARN $svc"
+            done
+
+            echo "=== [4/4] Estado ==="
             $COMPOSE ps
-            echo ""
-            echo "✅ Deploy completado — commit: $(git rev-parse --short HEAD)"
-
-            echo ""
-            echo "✅ Deploy completado — commit: $(git rev-parse --short HEAD)"
-
-      # ── 3. Notificar resultado ───────────────────────────────────────────────
-      - name: Notificar éxito
-        if: success()
-        run: |
-          echo "✅ Deploy a producción completado — ${{ github.sha }}"
-
-      - name: Notificar fallo (y rollback manual)
-        if: failure()
-        run: |
-          echo "❌ Deploy fallido — el servidor mantiene la versión anterior"
-          echo "Para rollback manual: ssh deploy@<host> 'cd /opt/teremoqwow && git reset --hard HEAD~1 && docker compose -f docker-compose.prod.yml up -d'"
+            echo "Deploy $NEW_SHA OK — actualizados: $ALL_RESTART"
+        env:
+          CHANGED_AUTH:     ${{ needs.detect.outputs.auth }}
+          CHANGED_BILLING:  ${{ needs.detect.outputs.billing }}
+          CHANGED_PORTAL:   ${{ needs.detect.outputs.portal }}
+          CHANGED_REGISTRY: ${{ needs.detect.outputs.registry }}
+          CHANGED_ADMIN:    ${{ needs.detect.outputs.admin }}
+          CHANGED_PLAYER:   ${{ needs.detect.outputs.player }}
+          CHANGED_INFRA:    ${{ needs.detect.outputs.infra }}
+          CHANGED_CONFIG:   ${{ needs.detect.outputs.config }}
+          FORCE_FULL:       ${{ github.event.inputs.force_full || 'false' }}
