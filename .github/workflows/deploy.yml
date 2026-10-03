@@ -71,26 +71,9 @@ jobs:
 
             echo "=== [5/5] Health check ==="
             sleep 15
-            # Verificar servicios core únicamente (los accesibles desde dentro de la red Docker)
-            docker compose -f $REPO_DIR/docker-compose.prod.yml ps --format json 2>/dev/null \
-              | python3 -c "
-import sys, json
-lines = sys.stdin.read().strip().splitlines()
-total = 0; running = 0
-for l in lines:
-    try:
-        s = json.loads(l)
-        total += 1
-        st = s.get('State','')
-        name = s.get('Name', s.get('Service','?'))
-        if st in ('running','restarting'):
-            running += 1
-        print(f'  {\"✅\" if st==\"running\" else \"⚠️ \"} {name}: {st}')
-    except: pass
-print(f'=== {running}/{total} servicios activos ===')
-# No fallar si al menos redis, auth, relay y krakend están running
-sys.exit(0)
-"
+            $COMPOSE ps
+            echo ""
+            echo "✅ Deploy completado — commit: $(git rev-parse --short HEAD)"
 
             echo ""
             echo "✅ Deploy completado — commit: $(git rev-parse --short HEAD)"
