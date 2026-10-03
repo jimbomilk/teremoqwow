@@ -15,6 +15,7 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Optional
 
 import jwt
@@ -47,6 +48,14 @@ def _load_public_key() -> str:
             priv = load_pem_private_key(f.read(), password=None)
         return priv.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
     raise RuntimeError("JWT_RS256_PUBLIC_KEY_PATH no configurado")
+
+
+def _load_private_key() -> str:
+    path = os.environ.get("JWT_RS256_PRIVATE_KEY_PATH", "")
+    if path and os.path.exists(path):
+        with open(path) as f:
+            return f.read()
+    raise RuntimeError("JWT_RS256_PRIVATE_KEY_PATH no configurado")
 
 
 def _require_role(*allowed_roles: str):
@@ -1297,6 +1306,348 @@ def admin_me():
     claims, err = _require_role(*ANALYST_ROLES)
     if err: return err
     return jsonify({k: claims[k] for k in ("sub", "email", "role") if k in claims}), 200
+
+
+# ── Overlays ──────────────────────────────────────────────────────────────────
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'overlays', 'templates')
+
+
+@app.route("/admin/overlays/templates", methods=["GET"])
+def list_overlay_templates():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    result = []
+    try:
+        for entry in sorted(os.listdir(TEMPLATES_DIR)):
+            meta_path = os.path.join(TEMPLATES_DIR, entry, "metadata.json")
+            if os.path.isfile(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                meta["preview_url"] = f"/admin/overlays/templates/{entry}/preview"
+                result.append(meta)
+    except Exception as exc:
+        logger.warning("admin: list_overlay_templates: %s", exc)
+    return jsonify(result), 200
+
+
+def _safe_template_path(template_id: str) -> str | None:
+    """Devuelve la ruta absoluta al metadata.json del template o None si es inválida."""
+    base = os.path.realpath(TEMPLATES_DIR)
+    candidate = os.path.realpath(os.path.join(TEMPLATES_DIR, template_id, "metadata.json"))
+    if not candidate.startswith(base + os.sep):
+        return None
+    return candidate
+
+
+@app.route("/admin/overlays/templates/<template_id>", methods=["GET"])
+def get_overlay_template(template_id: str):
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    meta_path = _safe_template_path(template_id)
+    if not meta_path or not os.path.isfile(meta_path):
+        return jsonify({"error": f"template '{template_id}' no encontrado"}), 404
+    with open(meta_path) as f:
+        meta = json.load(f)
+    meta["preview_url"] = f"/admin/overlays/templates/{template_id}/preview"
+    return jsonify(meta), 200
+
+
+@app.route("/admin/overlays/active", methods=["GET"])
+def list_active_overlays():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    r = _redis()
+    if not r:
+        return jsonify([]), 200
+    try:
+        keys = r.keys("overlay:*:*")
+        result = []
+        for key in keys:
+            val = r.get(key)
+            if val:
+                result.append(json.loads(val))
+        return jsonify(result), 200
+    except Exception as exc:
+        logger.warning("admin: list_active_overlays: %s", exc)
+        return jsonify([]), 200
+
+
+@app.route("/admin/overlays/publish", methods=["POST"])
+def publish_overlay():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    broadcast_id = body.get("broadcast_id", "")
+    template_id = body.get("template_id", "")
+    zone = body.get("zone", "bottom-bar")
+    duration_ms = int(body.get("duration_ms", 0))
+    animation = body.get("animation", "fade")
+    data = body.get("data", {})
+    style_overrides = body.get("style_overrides", {})
+
+    if not broadcast_id:
+        return jsonify({"error": "broadcast_id requerido"}), 400
+
+    meta_path = _safe_template_path(template_id)
+    if not meta_path or not os.path.isfile(meta_path):
+        return jsonify({"error": f"template '{template_id}' no encontrado"}), 404
+
+    overlay_id = str(uuid.uuid4())
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ttl = max(duration_ms // 1000 + 60, 3600) if duration_ms > 0 else 86400
+
+    overlay = {
+        "id": overlay_id,
+        "broadcast_id": broadcast_id,
+        "template_id": template_id,
+        "zone": zone,
+        "duration_ms": duration_ms,
+        "animation": animation,
+        "data": data,
+        "style_overrides": style_overrides,
+        "published_at": ts,
+        "published_by": claims.get("email", "?"),
+        "status": "active",
+    }
+
+    r = _redis()
+    if r:
+        r.setex(f"overlay:{broadcast_id}:{overlay_id}", ttl, json.dumps(overlay))
+        hist_entry = {**overlay, "action": "published"}
+        r.lpush(f"overlay_history:{broadcast_id}", json.dumps(hist_entry))
+        r.ltrim(f"overlay_history:{broadcast_id}", 0, 99)
+
+    _audit(claims, "overlay:publish", f"{template_id}@{zone} → {broadcast_id}")
+    return jsonify({"overlay_id": overlay_id, "status": "active", "ttl_s": ttl}), 200
+
+
+@app.route("/admin/overlays/unpublish", methods=["POST"])
+def unpublish_overlay():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    overlay_id = body.get("overlay_id", "")
+    broadcast_id = body.get("broadcast_id", "")
+
+    r = _redis()
+    if r:
+        r.delete(f"overlay:{broadcast_id}:{overlay_id}")
+        hist_entry = {
+            "overlay_id": overlay_id,
+            "broadcast_id": broadcast_id,
+            "action": "unpublished",
+            "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "published_by": claims.get("email", "?"),
+        }
+        r.lpush(f"overlay_history:{broadcast_id}", json.dumps(hist_entry))
+        r.ltrim(f"overlay_history:{broadcast_id}", 0, 99)
+
+    _audit(claims, "overlay:unpublish", f"{overlay_id} ← {broadcast_id}")
+    return jsonify({"ok": True, "overlay_id": overlay_id}), 200
+
+
+@app.route("/admin/overlays/unpublish-zone", methods=["POST"])
+def unpublish_overlay_zone():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    zone = body.get("zone", "")
+    broadcast_id = body.get("broadcast_id", "")
+
+    removed = 0
+    r = _redis()
+    if r:
+        for key in r.keys(f"overlay:{broadcast_id}:*"):
+            val = r.get(key)
+            if val:
+                ov = json.loads(val)
+                if ov.get("zone") == zone:
+                    r.delete(key)
+                    removed += 1
+
+    _audit(claims, "overlay:unpublish-zone", f"{zone} ← {broadcast_id}")
+    return jsonify({"ok": True, "removed": removed}), 200
+
+
+@app.route("/admin/overlays/clear-all", methods=["POST"])
+def clear_all_overlays():
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    broadcast_id = body.get("broadcast_id", "")
+
+    removed = 0
+    r = _redis()
+    if r:
+        for key in r.keys(f"overlay:{broadcast_id}:*"):
+            r.delete(key)
+            removed += 1
+
+    _audit(claims, "overlay:clear-all", broadcast_id)
+    return jsonify({"ok": True, "removed": removed}), 200
+
+
+@app.route("/admin/overlays/history", methods=["GET"])
+def overlay_history():
+    claims, err = _require_role(*ANALYST_ROLES)
+    if err: return err
+    broadcast_id = request.args.get("broadcast_id", "")
+
+    r = _redis()
+    if not r:
+        return jsonify([]), 200
+
+    try:
+        if broadcast_id:
+            raw = r.lrange(f"overlay_history:{broadcast_id}", 0, 99)
+        else:
+            # Aggregate all history keys
+            raw = []
+            for key in r.keys("overlay_history:*"):
+                raw.extend(r.lrange(key, 0, 99))
+        entries = [json.loads(e) for e in raw]
+        return jsonify(entries[:100]), 200
+    except Exception as exc:
+        logger.warning("admin: overlay_history: %s", exc)
+        return jsonify([]), 200
+
+
+# ── Overlays LLM ──────────────────────────────────────────────────────────────
+
+@app.route("/admin/overlays/generate-llm", methods=["POST"])
+def generate_llm_overlay():
+    """Genera un overlay candidato por prompt — requiere revisión humana antes de publicar."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    prompt = (body.get("prompt") or "").strip()
+    zone_hint = body.get("zone_hint", "bottom-bar")
+    broadcast_id = body.get("broadcast_id", "")
+
+    if not prompt:
+        return jsonify({"error": "prompt requerido"}), 400
+    if len(prompt) > 500:
+        return jsonify({"error": "prompt máximo 500 caracteres"}), 400
+    if "<" in prompt or ">" in prompt:
+        return jsonify({"error": "prompt no puede contener HTML"}), 400
+
+    llm_provider = os.environ.get("LLM_PROVIDER", "stub")
+
+    if llm_provider == "openai":
+        candidate = _llm_openai_generate(prompt, zone_hint)
+    else:
+        candidate = _llm_stub_generate(prompt, zone_hint)
+
+    return jsonify({
+        "status": "pending_review",
+        "candidate": candidate,
+        "prompt": prompt,
+        "provider": llm_provider,
+        "note": "Revisa el candidato antes de publicar via POST /admin/overlays/publish",
+    }), 200
+
+
+def _llm_stub_generate(prompt: str, zone_hint: str) -> dict:
+    """Stub: heurísticas simples para seleccionar template."""
+    import re
+    prompt_lower = prompt.lower()
+    template_id = "banner-bottom"
+    zone = zone_hint or "bottom-bar"
+    data: dict = {}
+
+    if any(w in prompt_lower for w in ["logo", "marca", "brand"]):
+        template_id = "logo-corner"
+        zone = zone_hint or "top-right"
+        data = {"image_url": "https://via.placeholder.com/200x80?text=LOGO", "alt": "Logo"}
+    elif any(w in prompt_lower for w in ["marcador", "score", "gol", "partido", "resultado"]):
+        template_id = "scoreboard-sport"
+        zone = zone_hint or "top-right"
+        data = {"home_name": "LOCAL", "away_name": "VISIT.", "home_score": 0, "away_score": 0}
+    elif any(w in prompt_lower for w in ["estadística", "stat", "dato", "porcentaje"]):
+        template_id = "stats-bar"
+        zone = zone_hint or "bottom-right"
+        data = {"title": "Estadísticas", "items": [{"label": prompt[:40], "value": "—"}]}
+    elif any(w in prompt_lower for w in ["cuenta atrás", "countdown", "tiempo", "faltan"]):
+        template_id = "countdown-clock"
+        import datetime
+        target = (datetime.datetime.utcnow() + datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = {"target_iso": target, "label": "Comienza en"}
+    elif any(w in prompt_lower for w in ["publicidad", "anuncio", "sponsor", "patrocinador"]):
+        template_id = "ad-countdown"
+        zone = zone_hint or "center"
+        data = {"advertiser": "Patrocinador", "image_url": "https://via.placeholder.com/640x360?text=AD"}
+    elif any(w in prompt_lower for w in ["encuesta", "poll", "pregunta", "vota"]):
+        template_id = "poll-interactive"
+        data = {"question": prompt[:100], "options": [{"id": "a", "text": "Opción A"}, {"id": "b", "text": "Opción B"}], "duration_ms": 30000}
+    elif any(w in prompt_lower for w in ["ticker", "noticia", "news", "breaking"]):
+        template_id = "ticker-news"
+        zone = zone_hint or "bottom-bar"
+        data = {"items": [{"text": prompt, "prefix": "🔴 LIVE"}]}
+    elif any(w in prompt_lower for w in ["lower third", "presenter", "presentador", "nombre"]):
+        template_id = "lower-third"
+        data = {"title": prompt[:50], "subtitle": ""}
+    else:
+        template_id = "banner-bottom"
+        data = {"text": prompt[:100]}
+
+    return {
+        "template_id": template_id,
+        "zone": zone,
+        "duration_ms": 10000,
+        "animation": "fade",
+        "data": data,
+        "style_overrides": {},
+        "confidence": 0.7,
+        "explanation": f"Stub: seleccionado '{template_id}' basado en palabras clave del prompt.",
+    }
+
+
+def _llm_openai_generate(prompt: str, zone_hint: str) -> dict:
+    """OpenAI: usa gpt-4o-mini para generar el candidato JSON."""
+    import re
+    import urllib.request as req
+    import json as _json
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        logger.warning("OPENAI_API_KEY no configurado, usando stub")
+        return _llm_stub_generate(prompt, zone_hint)
+
+    system_msg = (
+        "Eres un asistente que genera configuraciones de overlays de vídeo en directo. "
+        "Dado un prompt en lenguaje natural, devuelve SOLO un objeto JSON con estos campos: "
+        "template_id (uno de: logo-corner, banner-bottom, lower-third, scoreboard-sport, "
+        "stats-bar, ad-countdown, ticker-news, countdown-clock, image-overlay, sponsor-banner, "
+        "poll-interactive, custom-html), zone (una de: top-left, top-center, top-right, "
+        "middle-left, center, middle-right, bottom-left, bottom-center, bottom-right, "
+        "bottom-bar, top-bar, full), duration_ms (entero), animation (fade|slide-up|slide-left|pop|none), "
+        "data (objeto con campos específicos del template), style_overrides (objeto vacío si no se especifica), "
+        "confidence (float 0-1), explanation (string breve). Responde SOLO JSON válido."
+    )
+    payload = _json.dumps({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": f"Zona sugerida: {zone_hint}. Prompt: {prompt}"},
+        ],
+        "max_tokens": 500,
+        "temperature": 0.3,
+    }).encode()
+
+    try:
+        r2 = req.urlopen(req.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=payload,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        ), timeout=10)
+        result = _json.loads(r2.read())
+        content = result["choices"][0]["message"]["content"].strip()
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        if m:
+            return _json.loads(m.group(0))
+    except Exception as exc:
+        logger.warning("LLM OpenAI error: %s — usando stub", exc)
+    return _llm_stub_generate(prompt, zone_hint)
 
 
 if __name__ == "__main__":
