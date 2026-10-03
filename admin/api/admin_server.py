@@ -1615,17 +1615,21 @@ def _llm_gemini_generate(prompt: str, zone_hint: str) -> dict:
         logger.warning("GEMINI_API_KEY no configurado, usando stub")
         return _llm_stub_generate(prompt, zone_hint)
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    # Template IDs exactos — el LLM DEBE usar solo estos valores
+    _TEMPLATE_IDS = "logo-corner, banner-bottom, lower-third, scoreboard-sport, stats-bar, ad-countdown, ticker-news, countdown-clock, image-overlay, sponsor-banner, poll-interactive, custom-html"
+    _ZONES = "top-left, top-center, top-right, middle-left, center, middle-right, bottom-left, bottom-center, bottom-right, bottom-bar, top-bar, full"
     system_msg = (
         "Eres un asistente que genera configuraciones de overlays de vídeo en directo. "
-        "Dado un prompt en lenguaje natural, devuelve SOLO un objeto JSON con estos campos: "
-        "template_id (uno de: logo-corner, banner-bottom, lower-third, scoreboard-sport, "
-        "stats-bar, ad-countdown, ticker-news, countdown-clock, image-overlay, sponsor-banner, "
-        "poll-interactive, custom-html), zone (una de: top-left, top-center, top-right, "
-        "middle-left, center, middle-right, bottom-left, bottom-center, bottom-right, "
-        "bottom-bar, top-bar, full), duration_ms (entero), animation (fade|slide-up|slide-left|pop|none), "
-        "data (objeto con campos específicos del template), style_overrides (objeto vacío si no se especifica), "
-        "confidence (float 0-1), explanation (string breve). Responde SOLO JSON válido, sin markdown."
+        "Dado un prompt en lenguaje natural, devuelve SOLO un objeto JSON con estos campos exactos: "
+        f"template_id (OBLIGATORIO: elige UNO de esta lista exacta: {_TEMPLATE_IDS}), "
+        f"zone (OBLIGATORIO: elige UNO de: {_ZONES}), "
+        "duration_ms (entero en ms, ej. 10000), "
+        "animation (uno de: fade, slide-up, slide-left, pop, none), "
+        "data (objeto con campos del template, ej. para scoreboard-sport: home_name, away_name, home_score, away_score), "
+        "style_overrides (objeto vacío {} si no se especifica), "
+        "confidence (float 0.0-1.0), explanation (string breve en español). "
+        "IMPORTANTE: template_id debe ser exactamente uno de los valores de la lista, sin variaciones."
     )
     payload = _json.dumps({
         "system_instruction": {"parts": [{"text": system_msg}]},
