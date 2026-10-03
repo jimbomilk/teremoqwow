@@ -59,9 +59,9 @@ services:
       KRAKEND_CONFIG: /etc/krakend/krakend.json
     depends_on:
       billing-webhook:
-        condition: service_healthy
+        condition: service_started
       registry-server:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
       interval: 10s
@@ -134,7 +134,7 @@ services:
     env_file: /home/deploy/.env
     depends_on:
       auth:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 9003"]
       interval: 10s
@@ -175,7 +175,7 @@ services:
       - ./overlays/templates:/app/overlays/templates:ro
     depends_on:
       auth:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 9004"]
       interval: 10s
