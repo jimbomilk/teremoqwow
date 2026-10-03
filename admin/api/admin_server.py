@@ -433,6 +433,45 @@ def stop_inject():
     return jsonify({"status": "stopped"}), 200
 
 
+@app.route("/admin/broadcasts/quick-test", methods=["POST"])
+def quick_test_broadcast():
+    """Crea un stream de test con preset HD (issue #168). Máximo 3 streams activos."""
+    claims, err = _require_role(*OPERATOR_ROLES)
+    if err: return err
+    active_count = sum(1 for b in _bcast_list() if b.get("status") == "active")
+    if active_count >= 3:
+        return jsonify({"error": "Límite de 3 streams activos"}), 409
+    broadcast_id = f"anon/test-{time.strftime('%H%M%S')}"
+    data = {
+        "id": broadcast_id,
+        "status": "active",
+        "status_reason": "",
+        "bitrate_kbps": 4128,
+        "viewers": 0,
+        "uptime_s": 0,
+        "encoder": "ffmpeg-testsrc2",
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "killed": False,
+        "simulated": True,
+        "ingest_type": "testsrc2",
+        "video_codec": "H.264",
+        "video_profile": "Main",
+        "video_resolution": "1280x720",
+        "video_fps": 30,
+        "video_kbps": 4000,
+        "video_level": _h264_level("1280x720", 30),
+        "audio_codec": "AAC",
+        "audio_kbps": 128,
+        "audio_channels": 2,
+        "audio_sample_rate": 48000,
+        "audio_tracks": [{"id": "t0", "lang": "es", "label": "Español", "pid": 481, "default": True}],
+        "lipsync_ms": 0,
+    }
+    _bcast_set(broadcast_id, data)
+    _audit(claims, "quick_test_broadcast", broadcast_id)
+    return jsonify({"broadcast_id": broadcast_id, "status": "active"}), 200
+
+
 @app.route("/admin/broadcasts/config", methods=["PATCH"])
 def patch_broadcast():
     claims, err = _require_role(*OPERATOR_ROLES)
