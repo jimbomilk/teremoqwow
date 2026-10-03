@@ -143,8 +143,8 @@
           "alg": "RS256",
           "jwk_url": "http://auth:8082/.well-known/jwks.json",
           "disable_jwk_security": false,
-          "roles_key": "scopes",
-          "roles": ["viewer"]
+          "roles_key": "role",
+          "roles": ["viewer", "broadcaster", "admin", "operator"]
         }
       },
       "backend": [
@@ -152,6 +152,20 @@
           "url_pattern": "/v1/interactions",
           "method": "POST",
           "host": ["http://interactions:8083"],
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "endpoint": "/cert-hash",
+      "method": "GET",
+      "output_encoding": "json",
+      "input_headers": [],
+      "backend": [
+        {
+          "url_pattern": "/admin/relay/cert-hash",
+          "method": "GET",
+          "host": ["http://admin-api:9004"],
           "encoding": "json"
         }
       ]

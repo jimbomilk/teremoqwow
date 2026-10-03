@@ -581,7 +581,7 @@ function _startRelayPoll(broadcasts) {
         const statusEl  = document.getElementById('relay-status-' + tid);
         if (!viewersEl || !statusEl) return;
         const isLive = d.online && d.broadcasts.some(s => s.includes(b.id.split('/')[0]));
-        const viewers = isLive ? Math.max(b.viewers, 1) : b.viewers;
+        const viewers = b.viewers;
         viewersEl.textContent = String(viewers);
         viewersEl.style.color = isLive ? 'var(--green)' : 'var(--muted)';
         statusEl.textContent  = d.online ? (isLive ? '🟢 publicando' : '🟡 sin stream') : '🔴 relay off';

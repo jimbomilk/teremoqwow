@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/sync/v2/overlay-command.json",
+  "title": "OverlayCommand",
+  "description": "Comando de control del motor de overlays publicado en el track MoQ 'overlay-cmd'. Permite publicar, retirar o actualizar overlays en tiempo real.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cmd", "broadcast_id", "ts"],
+  "properties": {
+    "cmd": {
+      "type": "string",
+      "enum": ["publish", "unpublish", "unpublish-zone", "clear-all"],
+      "description": "Acción a ejecutar en el motor de overlays del player."
+    },
+    "broadcast_id": { "type": "string" },
+    "ts": {
+      "$ref": "https://teremoqwow.dev/schemas/common/v1/timestamp.json"
+    },
+    "overlay_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Requerido en cmd=unpublish. ID del overlay a retirar."
+    },
+    "zone": {
+      "type": "string",
+      "description": "Requerido en cmd=unpublish-zone. Retira todos los overlays de esa zona."
+    },
+    "payload": {
+      "$ref": "https://teremoqwow.dev/schemas/sync/v2/overlay-payload.json",
+      "description": "Requerido en cmd=publish."
+    }
+  }
+}
