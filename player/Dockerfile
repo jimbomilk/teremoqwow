@@ -2,8 +2,8 @@ FROM node:20-alpine AS dev
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json ./
+RUN npm install
 
 COPY . .
 
@@ -15,8 +15,8 @@ CMD ["npm", "run", "dev"]
 FROM node:20-alpine AS build
 
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --production=false
+COPY package.json ./
+RUN npm install --production=false
 COPY . .
 RUN npm run build
 

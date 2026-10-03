@@ -38,7 +38,8 @@ jobs:
             set -euo pipefail
 
             REPO_DIR=/opt/teremoqwow
-            COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
+            export DOMAIN=wow.teremoq.com
+            COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml --env-file /etc/teremoqwow/.env"
 
             echo "=== [1/5] Actualizar código ==="
             cd $REPO_DIR
