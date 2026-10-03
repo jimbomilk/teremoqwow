@@ -195,7 +195,7 @@ services:
     networks: [teremoqwow-prod]
     depends_on:
       admin-api:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -288,7 +288,6 @@ services:
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - player
-      - admin
       - krakend
     restart: unless-stopped
     logging:

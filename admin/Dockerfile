@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir \
 
 COPY api/admin_server.py ./admin_server.py
 
+EXPOSE 9004
+CMD ["gunicorn", "--bind", "0.0.0.0:9004", "--workers", "2", "--timeout", "60", "admin_server:app"]
+
 # ── Frontend static (nginx) ────────────────────────────────────────────────────
 FROM nginx:alpine AS frontend
 
