@@ -135,6 +135,13 @@
 <div id="main">
   <div id="topbar">
     <span class="title" id="page-title">Broadcasts</span>
+    <div id="global-status" style="display:flex;align-items:center;gap:0.75rem;font-size:0.75rem">
+      <span id="gs-relay">relay ●</span>
+      <span id="gs-krakend">krakend ●</span>
+      <span id="gs-streams">— señales</span>
+      <span id="gs-viewers">— viewers</span>
+      <span id="gs-alerts" style="cursor:pointer" onclick="navigate(document.querySelector('[data-page=broadcasts]'))">0 alertas</span>
+    </div>
     <span class="user">
       <span id="user-email"></span>
       <button class="logout-btn" onclick="logout()">Salir</button>
@@ -206,6 +213,7 @@ async function login() {
     document.getElementById('user-email').textContent = payload.email;
     document.getElementById('sidebar-user').textContent = `${payload.role} · ${payload.email}`;
     loadPage(currentPage);
+    _startGlobalStatusPoll();
   } catch(e) {
     document.getElementById('login-error').textContent = 'Error de conexión con Auth API';
   }
@@ -270,8 +278,8 @@ function _renderSignalTile(b, audioInfo, ls, playerUrl) {
                padding:2px 10px;border-radius:4px;font-size:0.72rem;text-decoration:none;white-space:nowrap">▶ Ver</a>
       <button onclick="stopInject('${b.id}')"
         style="background:rgba(239,83,80,0.12);border:1px solid rgba(239,83,80,0.3);color:var(--red);
-               padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.72rem">⏹</button>
-      <button class="btn danger" style="font-size:0.7rem;padding:2px 8px" onclick="killBroadcast('${b.id}')">Kill</button>
+               padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.72rem">⏹ Parar</button>
+      <button class="btn danger" style="font-size:0.7rem;padding:2px 8px;margin-left:8px;border-color:var(--red)" onclick="killBroadcast('${b.id}')">💀 Forzar</button>
       <button onclick="navigator.clipboard.writeText('${viewUrl}').then(e=>this.textContent='✓').catch(()=>{})"
         style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;cursor:pointer;font-size:0.7rem" title="Copiar URL">📋</button>
     </div>
@@ -283,10 +291,12 @@ function _renderSignalTile(b, audioInfo, ls, playerUrl) {
         <div style="padding:0.3rem 0.6rem;font-size:0.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,0.05)">
           📹 Vídeo <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· origen</span>
         </div>
-        <video id="cv-vid-${tid}"
-          src="/preview.mp4"
-          autoplay muted loop playsinline
-          style="flex:1;width:100%;height:220px;min-height:220px;display:block;background:#000;object-fit:cover"></video>
+        <iframe id="cv-vid-${tid}"
+          src="${viewUrl}"
+          loading="lazy"
+          style="flex:1;width:100%;height:220px;min-height:220px;display:block;background:#000;border:none"
+          title="Preview stream ${b.id}">
+        </iframe>
         <div style="padding:0.35rem 0.6rem;font-size:0.7rem;line-height:1.6;border-top:1px solid rgba(255,255,255,0.06)">
           <div style="color:var(--text);font-weight:500">${b.video_resolution||'1280×720'} · ${b.video_fps||30} fps</div>
           <div style="color:var(--muted)">${b.video_codec||'H.264'} ${b.video_profile||'Main'}</div>
@@ -389,7 +399,12 @@ async function loadBroadcasts() {
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
           <div class="section-title" style="margin:0">Señales activas (${active.length})</div>
-          <span style="font-size:0.72rem;color:var(--muted)">${cols === 1?'1 columna':'2 columnas'} · vídeo · audio · data</span>
+          <div style="display:flex;align-items:center;gap:0.5rem">
+            ${active.length < 3 ? `<button id="btn-quick-test" onclick="quickTest(this)"
+              style="background:rgba(76,175,80,0.15);border:1px solid var(--green);color:var(--green);
+                     padding:2px 10px;border-radius:4px;cursor:pointer;font-size:0.78rem">🚀 Test rápido</button>` : ''}
+            <span style="font-size:0.72rem;color:var(--muted)">${cols === 1?'1 columna':'2 columnas'} · vídeo · audio · data</span>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:0.75rem;margin-bottom:1.25rem">
           ${tiles}
@@ -593,77 +608,35 @@ function _startRelayPoll(broadcasts) {
   _relayPollTimer = setInterval(poll, 3000); // cada 3s
 }
 
-// ── Animaciones de señal ───────────────────────────────────────────────────────
+// ── Animaciones de señal (solo audio canvas; vídeo es iframe) ─────────────────
 
 let _animFrames = [];
 function _startSignalAnimations(broadcasts) {
   _animFrames.forEach(id => cancelAnimationFrame(id));
   _animFrames = [];
-  broadcasts.forEach(b => _animateTile(b));
-}
-
-function _animateTile(b) {
-  const tid = _signalTileId(b.id);
-
-  // ── VIDEO: ahora es un iframe con el player real, no animamos ─────────────
-  const cvv = document.getElementById('cv-vid-' + tid);
-  if (cvv && cvv.tagName === 'CANVAS') {
-    const ctx = cvv.getContext('2d');
-    const W = cvv.offsetWidth || 200, H = cvv.offsetHeight || 120;
-    cvv.width = W; cvv.height = H;
-    const smpte = ['#C0C0C0','#C0C000','#00C0C0','#00C000','#C000C0','#C00000','#0000C0'];
-    const bw = W / smpte.length;
-    let vPhase = 0;
-    const vAmps = Array.from({length:48}, () => 0.4 + Math.random() * 0.6);
-    function drawVideo() {
-      ctx.clearRect(0, 0, W, H);
-      // Fondo SMPTE
-      smpte.forEach((c, i) => { ctx.fillStyle = c + '55'; ctx.fillRect(i*bw, 0, bw, H); });
-      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
-      // Waveform
-      const cy = H * 0.48, amp = H * 0.30;
-      ctx.beginPath(); ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.8;
-      for (let i = 0; i < 48; i++) {
-        const x = (i / 47) * W;
-        const y = cy + Math.sin((i/47)*Math.PI*5 + vPhase) * amp * (vAmps[i] + (Math.random()-.5)*.05);
-        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
-      }
-      ctx.stroke();
-      vPhase += 0.055;
-      _animFrames.push(requestAnimationFrame(drawVideo));
-    }
-    drawVideo();
-  }
-
-  // ── AUDIO canvas: VU meters ───────────────────────────────────────────────
-  const cva = document.getElementById('cv-aud-' + tid);
-  if (cva) {
+  broadcasts.forEach(b => {
+    const tid = _signalTileId(b.id);
+    const cva = document.getElementById('cv-aud-' + tid);
+    if (!cva) return;
     const ctx = cva.getContext('2d');
     const W = cva.offsetWidth || 200, H = cva.offsetHeight || 120;
     cva.width = W; cva.height = H;
-    // Estado del VU: nivel [0..1], peak, decay
     let vuL = 0.75, vuR = 0.68, pkL = 0.75, pkR = 0.68;
-    const PKD = 0.008; // decay de peak por frame
+    const PKD = 0.008;
     function drawAudio() {
       ctx.clearRect(0, 0, W, H);
       ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
-
-      // Simular fluctuación de nivel con tendencia basada en bitrate
       const base = Math.min(0.95, 0.5 + (b.audio_kbps || 128) / 512);
       vuL = Math.max(0.05, Math.min(0.98, vuL + (Math.random()-.42)*0.12 + (base-vuL)*0.06));
       vuR = Math.max(0.05, Math.min(0.98, vuR + (Math.random()-.42)*0.12 + (base-vuR)*0.06));
       pkL = Math.max(vuL, pkL - PKD);
       pkR = Math.max(vuR, pkR - PKD);
-
       const mW = 22, gap = 6, barsTotal = 2*mW + gap;
       const ox = (W - barsTotal) / 2;
       const barH = H * 0.72;
       const barY = H * 0.06;
-
       [['L', ox, vuL, pkL], ['R', ox+mW+gap, vuR, pkR]].forEach(([label, x, lv, pk]) => {
-        // Fondo barra
         ctx.fillStyle = '#1a1a2e'; ctx.fillRect(x, barY, mW, barH);
-        // Segmentos coloreados de abajo a arriba
         const segs = 20;
         const filledSegs = Math.round(lv * segs);
         for (let s = 0; s < segs; s++) {
@@ -676,26 +649,21 @@ function _animateTile(b) {
             : '#ef5350';
           ctx.fillRect(x+1, sy, mW-2, sh);
         }
-        // Peak hold
         const py = barY + barH - pk*barH - 2;
         ctx.fillStyle = '#fff'; ctx.fillRect(x, py, mW, 2);
-        // Label
         ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
         ctx.fillText(label, x + mW/2, barY + barH + 11);
       });
-
-      // LUFS simulado
       const lufs = -23 + (vuL + vuR - 1.0) * 8;
       const dbfs = -6 + (Math.max(pkL, pkR) - 0.8) * 18;
       ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`${lufs.toFixed(1)} LUFS`, W/2, H*0.94);
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fillText(`pico ${dbfs.toFixed(1)} dBFS`, W/2, H*0.86);
-
       _animFrames.push(requestAnimationFrame(drawAudio));
     }
     drawAudio();
-  }
+  });
 }
 
 async function addAudioTrackUI(broadcastId) {
@@ -900,8 +868,24 @@ async function injectReal() {
   } catch(e) { if(st) st.textContent = 'Error: ' + e.message; }
 }
 
+async function quickTest(btn) {
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '⏳...';
+  try {
+    const r = await api('/admin/broadcasts/quick-test', {method:'POST', body: JSON.stringify({})});
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'Error al crear test rápido'); }
+    loadBroadcasts();
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
 async function killBroadcast(id) {
-  if (!confirm(`¿Matar broadcast ${id}?`)) return;
+  if (!confirm(`¿Forzar parada de broadcast ${id}?`)) return;
   await api('/admin/broadcasts/kill', {method:'POST', body: JSON.stringify({broadcast_id: id})});
   loadBroadcasts();
 }
@@ -917,6 +901,34 @@ async function injectFromForm() { await injectReal(); }
 async function stopInject(id) {
   await api('/admin/broadcasts/stop-inject', {method:'POST', body: JSON.stringify({broadcast_id: id})});
   loadBroadcasts();
+}
+
+// ── Global status poll ────────────────────────────────────────────────────────
+
+async function _startGlobalStatusPoll() {
+  async function poll() {
+    try {
+      const rc = await api('/admin/relay/connections');
+      const rcData = await rc.json();
+      document.getElementById('gs-relay').textContent = rcData.online ? 'relay 🟢' : 'relay 🔴';
+      document.getElementById('gs-relay').style.color = rcData.online ? 'var(--green)' : 'var(--red)';
+
+      const bc = await api('/admin/broadcasts');
+      const bcData = await bc.json();
+      const active = bcData.filter(b => b.status === 'active');
+      const viewers = bcData.reduce((s, b) => s + (b.viewers || 0), 0);
+      document.getElementById('gs-streams').textContent = `${active.length} señales`;
+      document.getElementById('gs-viewers').textContent = `${viewers} viewers`;
+
+      const al = await api('/admin/audio/alerts');
+      const alData = await al.json();
+      const alertsEl = document.getElementById('gs-alerts');
+      alertsEl.textContent = `${alData.length} ${alData.length === 1 ? 'alerta' : 'alertas'}`;
+      alertsEl.style.color = alData.length > 0 ? 'var(--red)' : 'var(--muted)';
+    } catch (_) {}
+  }
+  poll();
+  setInterval(poll, 10000);
 }
 
 // ── Federación ────────────────────────────────────────────────────────────────
