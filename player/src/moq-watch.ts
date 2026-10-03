@@ -40,6 +40,7 @@ export async function fetchCertHash(
 interface OverlayMessage {
   type: string;
   data?: any;
+  payload?: any;
 }
 
 /**

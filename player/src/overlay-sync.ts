@@ -184,7 +184,7 @@ export class OverlaySyncScheduler {
     this.onMetrics(deviation);
 
     // Log y advertencia si desviación es alta
-    const passesThreshold = Math.abs(corrected_deviation_ms) <= this.maxDeviationMs;
+    const passesThreshold = Math.abs(correctedDeviationMs) <= this.maxDeviationMs;
     if (!passesThreshold) {
       console.warn(
         `[OverlaySync] ${event.kind} event ${event.id} rendered with deviation ${correctedDeviationMs.toFixed(2)}ms (threshold: ${this.maxDeviationMs}ms)`
