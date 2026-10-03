@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir \
     flask==3.0.3 \
+    flask-cors==4.0.1 \
     gunicorn==22.0.0 \
     PyJWT==2.8.0 \
     cryptography==42.0.8 \
