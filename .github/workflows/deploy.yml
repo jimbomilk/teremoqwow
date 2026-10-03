@@ -87,7 +87,6 @@ jobs:
           port: 22
           timeout: 600s
           script: |
-            set -eo pipefail
             REPO_DIR=/opt/teremoqwow
             # Cargar .env — grep elimina comentarios y vacías antes de exportar
             export $(grep -v '^#' /home/deploy/.env | grep -v '^$' | xargs -d '\n') 2>/dev/null || true
