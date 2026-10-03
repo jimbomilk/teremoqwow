@@ -1,0 +1,11 @@
+{
+  "id": "custom-html",
+  "name": "HTML personalizado",
+  "description": "HTML sandboxed con whitelist de tags y CSS scoped",
+  "kind": "custom-html",
+  "preview_bg": "#fff",
+  "vars": {
+    "required": ["html"],
+    "optional": ["css"]
+  }
+}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: Arial, sans-serif; }
+    #panel {
+      background: rgba(10,15,30,0.9); border-radius: 6px;
+      padding: 10px 14px; width: 100%; height: 100%; overflow: hidden;
+    }
+    #title { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .stat-item { margin-bottom: 6px; }
+    .stat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+    .stat-label { font-size: 12px; color: rgba(255,255,255,0.75); }
+    .stat-value-row { display: flex; align-items: center; gap: 6px; }
+    .stat-value { font-size: 14px; font-weight: 700; color: #fff; }
+    .stat-trend { font-size: 12px; }
+    .trend-up { color: #4caf50; }
+    .trend-down { color: #ef5350; }
+    .trend-neutral { color: rgba(255,255,255,0.4); }
+    .bar-track { height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px; }
+    .bar-fill { height: 100%; background: #2196f3; border-radius: 2px; transition: width 0.4s; }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <div id="title"></div>
+    <div id="items"></div>
+  </div>
+  <script>
+    var titleEl = document.getElementById('title');
+    var itemsEl = document.getElementById('items');
+
+    function render(data) {
+      titleEl.textContent = data.title || '';
+      itemsEl.innerHTML = '';
+      var items = Array.isArray(data.items) ? data.items : [];
+      items.forEach(function(item) {
+        var row = document.createElement('div');
+        row.className = 'stat-item';
+
+        var header = document.createElement('div');
+        header.className = 'stat-header';
+
+        var label = document.createElement('span');
+        label.className = 'stat-label';
+        label.textContent = item.label || '';
+
+        var valueRow = document.createElement('div');
+        valueRow.className = 'stat-value-row';
+
+        var value = document.createElement('span');
+        value.className = 'stat-value';
+        value.textContent = item.value != null ? String(item.value) : '';
+
+        valueRow.appendChild(value);
+
+        if (item.trend) {
+          var trend = document.createElement('span');
+          trend.className = 'stat-trend';
+          if (item.trend === 'up') { trend.className += ' trend-up'; trend.textContent = '\u2191'; }
+          else if (item.trend === 'down') { trend.className += ' trend-down'; trend.textContent = '\u2193'; }
+          else { trend.className += ' trend-neutral'; trend.textContent = '\u2192'; }
+          valueRow.appendChild(trend);
+        }
+
+        header.appendChild(label);
+        header.appendChild(valueRow);
+        row.appendChild(header);
+
+        if (item.bar_pct != null) {
+          var track = document.createElement('div');
+          track.className = 'bar-track';
+          var fill = document.createElement('div');
+          fill.className = 'bar-fill';
+          var pct = Math.min(100, Math.max(0, Number(item.bar_pct)));
+          fill.style.width = pct + '%';
+          track.appendChild(fill);
+          row.appendChild(track);
+        }
+
+        itemsEl.appendChild(row);
+      });
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

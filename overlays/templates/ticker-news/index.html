@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: Arial, sans-serif; }
+    #bar {
+      display: flex; align-items: center;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85); overflow: hidden;
+    }
+    #ticker-label {
+      flex-shrink: 0; padding: 0 14px;
+      font-size: 13px; font-weight: 700; color: #fff;
+      background: #e53935; height: 100%; display: flex; align-items: center;
+      white-space: nowrap;
+    }
+    #ticker-viewport { flex: 1; overflow: hidden; height: 100%; position: relative; }
+    #ticker-track {
+      display: flex; align-items: center; height: 100%;
+      white-space: nowrap; animation: ticker-scroll linear infinite;
+    }
+    @keyframes ticker-scroll {
+      from { transform: translateX(100%); }
+      to { transform: translateX(-100%); }
+    }
+    .ticker-item { display: inline-flex; align-items: center; gap: 6px; padding: 0 24px; }
+    .ticker-prefix { font-size: 12px; font-weight: 700; color: #e53935; text-transform: uppercase; }
+    .ticker-text { font-size: 14px; color: #fff; }
+    .ticker-sep { color: rgba(255,255,255,0.3); margin: 0 8px; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <div id="ticker-label">NOTICIAS</div>
+    <div id="ticker-viewport">
+      <div id="ticker-track"></div>
+    </div>
+  </div>
+  <script>
+    var track = document.getElementById('ticker-track');
+
+    function render(data) {
+      track.innerHTML = '';
+      var items = Array.isArray(data.items) ? data.items : [];
+      var speed = parseInt(data.speed, 10) || 60;
+
+      items.forEach(function(item, idx) {
+        var el = document.createElement('span');
+        el.className = 'ticker-item';
+
+        if (item.prefix) {
+          var prefix = document.createElement('span');
+          prefix.className = 'ticker-prefix';
+          prefix.textContent = item.prefix;
+          el.appendChild(prefix);
+        }
+
+        var text = document.createElement('span');
+        text.className = 'ticker-text';
+        text.textContent = item.text || '';
+        el.appendChild(text);
+
+        if (idx < items.length - 1) {
+          var sep = document.createElement('span');
+          sep.className = 'ticker-sep';
+          sep.textContent = '\u25CF';
+          el.appendChild(sep);
+        }
+
+        track.appendChild(el);
+      });
+
+      // Duration: pixels / speed = seconds (track is roughly 200% wide)
+      var durationS = Math.max(10, 200 / speed * 10);
+      track.style.animationDuration = durationS + 's';
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

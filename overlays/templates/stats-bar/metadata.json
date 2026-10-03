@@ -1,0 +1,11 @@
+{
+  "id": "stats-bar",
+  "name": "Barra de estadísticas",
+  "description": "Lista de estadísticas con barras de progreso opcionales e iconos de tendencia",
+  "kind": "stats",
+  "preview_bg": "#0f172a",
+  "vars": {
+    "required": ["title", "items"],
+    "optional": []
+  }
+}

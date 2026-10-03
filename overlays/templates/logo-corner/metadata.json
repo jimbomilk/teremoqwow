@@ -1,0 +1,11 @@
+{
+  "id": "logo-corner",
+  "name": "Logo en esquina",
+  "description": "Logo PNG en zona con transparencia, clickable",
+  "kind": "logo",
+  "preview_bg": "#000000",
+  "vars": {
+    "required": ["image_url"],
+    "optional": ["alt", "link_url"]
+  }
+}

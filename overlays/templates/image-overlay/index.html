@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: Arial, sans-serif; }
+    #wrap { display: flex; flex-direction: column; width: 100%; height: 100%; align-items: center; justify-content: center; }
+    #img { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
+    #caption {
+      font-size: 12px; color: rgba(255,255,255,0.8); text-align: center;
+      background: rgba(0,0,0,0.55); padding: 4px 10px; border-radius: 0 0 4px 4px;
+      max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <img id="img" src="" alt="">
+    <div id="caption"></div>
+  </div>
+  <script>
+    var img = document.getElementById('img');
+    var caption = document.getElementById('caption');
+
+    function render(data) {
+      if (data.image_url) img.src = data.image_url;
+      if (data.alt) img.alt = data.alt;
+      if (data.fit) img.style.objectFit = data.fit;
+      if (data.caption) {
+        caption.textContent = data.caption;
+        caption.style.display = 'block';
+      }
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "id": "ad-countdown",
+  "name": "Publicidad con cuenta atrás",
+  "description": "Imagen a pantalla completa con countdown y botón skip configurable",
+  "kind": "ad",
+  "preview_bg": "#000",
+  "vars": {
+    "required": ["advertiser", "image_url"],
+    "optional": ["cta_text", "cta_url", "countdown_s", "skip_text"]
+  }
+}

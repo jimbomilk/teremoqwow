@@ -1,0 +1,11 @@
+{
+  "id": "lower-third",
+  "name": "Identificador inferior",
+  "description": "Franja inferior izquierda estilo TV con nombre y subtítulo",
+  "kind": "lower-third",
+  "preview_bg": "#111827",
+  "vars": {
+    "required": ["title"],
+    "optional": ["subtitle", "logo_url", "accent"]
+  }
+}

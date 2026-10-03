@@ -1,0 +1,11 @@
+{
+  "id": "ticker-news",
+  "name": "Ticker de noticias",
+  "description": "Texto deslizante horizontal de derecha a izquierda",
+  "kind": "ticker",
+  "preview_bg": "#1a1a1a",
+  "vars": {
+    "required": ["items"],
+    "optional": ["speed"]
+  }
+}

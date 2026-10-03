@@ -1,0 +1,11 @@
+{
+  "id": "image-overlay",
+  "name": "Imagen estática en zona",
+  "description": "Imagen con object-fit configurable y caption opcional",
+  "kind": "image",
+  "preview_bg": "#000",
+  "vars": {
+    "required": ["image_url"],
+    "optional": ["alt", "caption", "fit"]
+  }
+}
