@@ -1534,7 +1534,9 @@ def generate_llm_overlay():
 
     llm_provider = os.environ.get("LLM_PROVIDER", "stub")
 
-    if llm_provider == "openai":
+    if llm_provider == "gemini":
+        candidate = _llm_gemini_generate(prompt, zone_hint)
+    elif llm_provider == "openai":
         candidate = _llm_openai_generate(prompt, zone_hint)
     else:
         candidate = _llm_stub_generate(prompt, zone_hint)
@@ -1601,6 +1603,57 @@ def _llm_stub_generate(prompt: str, zone_hint: str) -> dict:
         "confidence": 0.7,
         "explanation": f"Stub: seleccionado '{template_id}' basado en palabras clave del prompt.",
     }
+
+
+def _llm_gemini_generate(prompt: str, zone_hint: str) -> dict:
+    """Google Gemini: usa gemini-2.0-flash-lite para generar el candidato JSON."""
+    import re
+    import urllib.request as req
+    import json as _json
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        logger.warning("GEMINI_API_KEY no configurado, usando stub")
+        return _llm_stub_generate(prompt, zone_hint)
+
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
+    system_msg = (
+        "Eres un asistente que genera configuraciones de overlays de vídeo en directo. "
+        "Dado un prompt en lenguaje natural, devuelve SOLO un objeto JSON con estos campos: "
+        "template_id (uno de: logo-corner, banner-bottom, lower-third, scoreboard-sport, "
+        "stats-bar, ad-countdown, ticker-news, countdown-clock, image-overlay, sponsor-banner, "
+        "poll-interactive, custom-html), zone (una de: top-left, top-center, top-right, "
+        "middle-left, center, middle-right, bottom-left, bottom-center, bottom-right, "
+        "bottom-bar, top-bar, full), duration_ms (entero), animation (fade|slide-up|slide-left|pop|none), "
+        "data (objeto con campos específicos del template), style_overrides (objeto vacío si no se especifica), "
+        "confidence (float 0-1), explanation (string breve). Responde SOLO JSON válido, sin markdown."
+    )
+    payload = _json.dumps({
+        "system_instruction": {"parts": [{"text": system_msg}]},
+        "contents": [{
+            "parts": [{"text": f"Zona sugerida: {zone_hint}. Prompt: {prompt}"}]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 500,
+            "responseMimeType": "application/json",
+        },
+    }).encode()
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    try:
+        r2 = req.urlopen(req.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        ), timeout=15)
+        result = _json.loads(r2.read())
+        content = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        if m:
+            return _json.loads(m.group(0))
+    except Exception as exc:
+        logger.warning("LLM Gemini error: %s — usando stub", exc)
+    return _llm_stub_generate(prompt, zone_hint)
 
 
 def _llm_openai_generate(prompt: str, zone_hint: str) -> dict:
