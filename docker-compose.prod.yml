@@ -36,7 +36,7 @@ services:
       --auth-public "anon/**"
       --web-http-listen [::]:8090
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8090/"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/ || nc -z localhost 8090"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -61,7 +61,7 @@ services:
       registry-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -78,7 +78,7 @@ services:
     networks: [teremoqwow-prod]
     env_file: /home/deploy/.env
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
+      test: ["CMD-SHELL", "nc -z localhost 9000"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -97,7 +97,7 @@ services:
     volumes:
       - ./schemas:/schemas:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      test: ["CMD-SHELL", "nc -z localhost 8081"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -114,7 +114,7 @@ services:
     networks: [teremoqwow-prod]
     env_file: /home/deploy/.env
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9002/health"]
+      test: ["CMD-SHELL", "nc -z localhost 9002"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -134,7 +134,7 @@ services:
       auth:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9003/health"]
+      test: ["CMD-SHELL", "nc -z localhost 9003"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -175,7 +175,7 @@ services:
       auth:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9004/health"]
+      test: ["CMD-SHELL", "nc -z localhost 9004"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -225,7 +225,7 @@ services:
       - ./config/clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     env_file: /home/deploy/.env
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8123/ping"]
       interval: 10s
       timeout: 5s
       retries: 6
