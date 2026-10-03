@@ -1,6 +1,7 @@
 import { estimateNTPOffset, calculateLatency, formatLatency } from './latency.ts';
 import { AbrController, DEFAULT_RENDITIONS, type Rendition } from './abr.ts';
 import { OverlaySyncScheduler, type TimingDeviation } from './overlay-sync.ts';
+import { OverlayEngine } from './overlay-engine.ts';
 
 /** Fetches cert hash from KrakenD /cert-hash, falling back to a provided getter. */
 export async function fetchCertHash(
@@ -231,6 +232,7 @@ export class MoQWatch extends _HTMLElementBase {
   private segmentBytesAccumulated: number = 0; // Acumular bytes entre ticks
 
   // Overlay management
+  private _overlayEngine: OverlayEngine | null = null;
   private overlayIframe: HTMLIFrameElement | null = null;
   private overlayOrigin: string = '';
   private interactionSubscription: any = null; // Suscripción al track 'interaction'
@@ -371,6 +373,12 @@ export class MoQWatch extends _HTMLElementBase {
       // Inicializar overlay sandbox
       await this.initializeOverlay();
 
+      // Instanciar OverlayEngine sobre el contenedor de overlays
+      const overlayRoot = this.shadowRoot?.querySelector('#overlay-container') as HTMLElement | null;
+      if (overlayRoot) {
+        this._overlayEngine = new OverlayEngine(overlayRoot);
+      }
+
       // Inicializar scheduler de sync para overlays e interacciones
       this.overlaySync = new OverlaySyncScheduler(() => this.currentPtsMs, {
         maxDeviationMs: 100,
@@ -491,10 +499,10 @@ export class MoQWatch extends _HTMLElementBase {
    * - Procesa votos y envía al servidor
    */
   private handleOverlayMessage(event: MessageEvent) {
-    // SEGURIDAD: verificar que el mensaje viene del contentWindow del iframe (cubre srcdoc donde origin="null")
-    const isFromOverlay = event.source === this.overlayIframe?.contentWindow;
-    if (!isFromOverlay) {
-      console.warn('[MoQWatch] Rejecting message from untrusted source');
+    // Aceptar mensajes del legacy iframe O de cualquier iframe gestionado por el OverlayEngine
+    const isLegacyOverlay = event.source === this.overlayIframe?.contentWindow;
+    const isEngineOverlay = this._overlayEngine?.isKnownSource(event.source as WindowProxy) ?? false;
+    if (!isLegacyOverlay && !isEngineOverlay) {
       return;
     }
 
@@ -504,8 +512,14 @@ export class MoQWatch extends _HTMLElementBase {
     console.debug('[MoQWatch] Overlay message:', message);
 
     if (message.type === 'interaction:vote') {
-      // El overlay envía un voto; el player lo envía al servidor
       this.submitVote(message.data);
+    } else if (message.type === 'overlay:action') {
+      // Re-emitir como evento del componente para que el host pueda reaccionar
+      this.dispatchEvent(new CustomEvent('moq:overlay-action', { detail: message.payload, bubbles: true }));
+      // Si la acción es un voto, procesarlo también
+      if (message.payload?.kind === 'vote') {
+        this.submitVote(message.payload);
+      }
     }
   }
 
@@ -697,6 +711,8 @@ export class MoQWatch extends _HTMLElementBase {
 
   private cleanup() {
     try {
+      this._overlayEngine?.clearAll();
+      this._overlayEngine = null;
       this._logic.cleanup();
       if (this.abrTickInterval !== null) {
         clearInterval(this.abrTickInterval);

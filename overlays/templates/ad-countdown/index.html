@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+    #ad-wrap { position: relative; width: 100%; height: 100%; }
+    #ad-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    #badge {
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(0,0,0,0.75); color: #fff; border-radius: 4px;
+      font-size: 12px; padding: 4px 8px; display: flex; flex-direction: column; align-items: center;
+    }
+    #countdown-label { font-size: 10px; color: rgba(255,255,255,0.6); }
+    #countdown-num { font-size: 20px; font-weight: 700; }
+    #skip-btn {
+      position: absolute; bottom: 12px; right: 12px;
+      background: rgba(0,0,0,0.75); color: #fff; border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer; display: none;
+    }
+    #cta-btn {
+      position: absolute; bottom: 12px; left: 12px;
+      background: #e53935; color: #fff; border: none;
+      border-radius: 4px; padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer; display: none;
+    }
+    #advertiser-label {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.6); color: rgba(255,255,255,0.7);
+      font-size: 11px; padding: 3px 8px; border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ad-wrap">
+    <img id="ad-img" src="" alt="">
+    <span id="advertiser-label"></span>
+    <div id="badge">
+      <span id="countdown-label">Publicidad</span>
+      <span id="countdown-num"></span>
+    </div>
+    <button id="skip-btn"></button>
+    <button id="cta-btn"></button>
+  </div>
+  <script>
+    var advertiserLabel = document.getElementById('advertiser-label');
+    var adImg = document.getElementById('ad-img');
+    var countdownNum = document.getElementById('countdown-num');
+    var skipBtn = document.getElementById('skip-btn');
+    var ctaBtn = document.getElementById('cta-btn');
+    var ctaUrl = null;
+    var timerInterval = null;
+
+    function render(data) {
+      adImg.src = data.image_url || '';
+      advertiserLabel.textContent = data.advertiser || '';
+      ctaUrl = data.cta_url || null;
+
+      if (data.cta_text) {
+        ctaBtn.textContent = data.cta_text;
+        ctaBtn.style.display = 'block';
+      }
+
+      var countdownS = parseInt(data.countdown_s, 10) || 0;
+      var skipText = data.skip_text || 'Saltar >';
+
+      if (countdownS > 0) {
+        var remaining = countdownS;
+        countdownNum.textContent = String(remaining);
+        timerInterval = setInterval(function() {
+          remaining--;
+          countdownNum.textContent = String(Math.max(0, remaining));
+          if (remaining <= 0) {
+            clearInterval(timerInterval);
+            skipBtn.textContent = skipText;
+            skipBtn.style.display = 'block';
+          }
+        }, 1000);
+      }
+    }
+
+    skipBtn.addEventListener('click', function() {
+      parent.postMessage({ type: 'overlay:action', payload: { kind: 'skip' } }, '*');
+    });
+
+    ctaBtn.addEventListener('click', function() {
+      parent.postMessage({ type: 'overlay:action', payload: { kind: 'cta_click', cta_url: ctaUrl } }, '*');
+    });
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

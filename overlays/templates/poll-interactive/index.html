@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: Arial, sans-serif; }
+    #poll {
+      display: flex; flex-direction: column; gap: 10px;
+      width: 100%; height: 100%; padding: 14px 16px;
+      background: rgba(13,17,23,0.92); border-radius: 8px; overflow: hidden;
+    }
+    #question { font-size: 16px; font-weight: 700; color: #fff; line-height: 1.3; }
+    #options { display: flex; flex-direction: column; gap: 6px; flex: 1; overflow: hidden; }
+    .opt-btn {
+      width: 100%; padding: 8px 12px; text-align: left;
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; color: #fff; font-size: 14px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .opt-btn:hover { background: rgba(255,255,255,0.15); }
+    .opt-btn.voted { border-color: #2196f3; background: rgba(33,150,243,0.18); }
+    .opt-result { position: relative; width: 100%; }
+    .opt-bar-track {
+      height: 36px; background: rgba(255,255,255,0.07); border-radius: 6px;
+      overflow: hidden; position: relative;
+    }
+    .opt-bar-fill { height: 100%; background: rgba(33,150,243,0.35); transition: width 0.5s; }
+    .opt-bar-label {
+      position: absolute; inset: 0; display: flex; align-items: center;
+      padding: 0 12px; justify-content: space-between;
+    }
+    .opt-bar-text { font-size: 13px; color: #fff; }
+    .opt-bar-pct { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.8); }
+    #footer { display: flex; justify-content: space-between; align-items: center; }
+    #countdown-bar-wrap { flex: 1; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-right: 10px; }
+    #countdown-bar { height: 100%; background: #2196f3; border-radius: 2px; transition: width 1s linear; }
+    #timer-text { font-size: 12px; color: rgba(255,255,255,0.5); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div id="poll">
+    <div id="question"></div>
+    <div id="options"></div>
+    <div id="footer">
+      <div id="countdown-bar-wrap"><div id="countdown-bar"></div></div>
+      <span id="timer-text"></span>
+    </div>
+  </div>
+  <script>
+    var questionEl = document.getElementById('question');
+    var optionsEl = document.getElementById('options');
+    var countdownBar = document.getElementById('countdown-bar');
+    var timerText = document.getElementById('timer-text');
+    var votedId = null;
+    var pollData = {};
+    var timerInterval = null;
+
+    function render(data) {
+      pollData = data;
+      questionEl.textContent = data.question || '';
+      renderOptions(false);
+
+      var durationS = Math.floor((data.duration_ms || 0) / 1000);
+      var remaining = durationS;
+      countdownBar.style.width = '100%';
+      timerText.textContent = remaining + 's';
+
+      timerInterval = setInterval(function() {
+        remaining = Math.max(0, remaining - 1);
+        var pct = durationS > 0 ? (remaining / durationS) * 100 : 0;
+        countdownBar.style.width = pct + '%';
+        timerText.textContent = remaining + 's';
+        if (remaining <= 0) clearInterval(timerInterval);
+      }, 1000);
+    }
+
+    function renderOptions(showResults) {
+      optionsEl.innerHTML = '';
+      var options = Array.isArray(pollData.options) ? pollData.options : [];
+      options.forEach(function(opt) {
+        if (showResults && pollData.show_results) {
+          var wrap = document.createElement('div');
+          wrap.className = 'opt-result';
+          var track = document.createElement('div');
+          track.className = 'opt-bar-track';
+          var fill = document.createElement('div');
+          fill.className = 'opt-bar-fill';
+          fill.style.width = (opt._pct || 0) + '%';
+          var labelDiv = document.createElement('div');
+          labelDiv.className = 'opt-bar-label';
+          var textSpan = document.createElement('span');
+          textSpan.className = 'opt-bar-text';
+          textSpan.textContent = opt.text || '';
+          var pctSpan = document.createElement('span');
+          pctSpan.className = 'opt-bar-pct';
+          pctSpan.textContent = (opt._pct || 0) + '%';
+          labelDiv.appendChild(textSpan);
+          labelDiv.appendChild(pctSpan);
+          track.appendChild(fill);
+          track.appendChild(labelDiv);
+          wrap.appendChild(track);
+          optionsEl.appendChild(wrap);
+        } else {
+          var btn = document.createElement('button');
+          btn.className = 'opt-btn' + (votedId === opt.id ? ' voted' : '');
+          btn.textContent = opt.text || '';
+          btn.addEventListener('click', (function(id) {
+            return function() {
+              if (votedId !== null && !pollData.allow_change) return;
+              votedId = id;
+              parent.postMessage({ type: 'overlay:action', payload: { kind: 'vote', option_id: id } }, '*');
+              renderOptions(Boolean(pollData.show_results));
+            };
+          })(opt.id));
+          optionsEl.appendChild(btn);
+        }
+      });
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

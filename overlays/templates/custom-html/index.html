@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: auto; }
+    #user-style {}
+    #content { width: 100%; height: 100%; }
+  </style>
+  <style id="user-style"></style>
+</head>
+<body>
+  <div id="content"></div>
+  <script>
+    var allowedTags = new Set(['div','span','p','img','a','strong','em','h1','h2','h3','ul','li']);
+    var allowedAttrs = { a: ['href'], img: ['src', 'alt'], '*': ['class', 'style', 'id'] };
+
+    function sanitize(htmlString) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(htmlString, 'text/html');
+
+      function cloneNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent || '');
+        if (node.nodeType !== Node.ELEMENT_NODE) return null;
+        var tag = node.tagName.toLowerCase();
+        if (!allowedTags.has(tag)) return null;
+
+        var clean = document.createElement(tag);
+        var specific = allowedAttrs[tag] || [];
+        var global = allowedAttrs['*'] || [];
+        for (var i = 0; i < node.attributes.length; i++) {
+          var attr = node.attributes[i];
+          if (specific.indexOf(attr.name) !== -1 || global.indexOf(attr.name) !== -1) {
+            clean.setAttribute(attr.name, attr.value);
+          }
+        }
+        for (var j = 0; j < node.childNodes.length; j++) {
+          var child = cloneNode(node.childNodes[j]);
+          if (child) clean.appendChild(child);
+        }
+        return clean;
+      }
+
+      var container = document.createElement('div');
+      for (var k = 0; k < doc.body.childNodes.length; k++) {
+        var cleanChild = cloneNode(doc.body.childNodes[k]);
+        if (cleanChild) container.appendChild(cleanChild);
+      }
+      return container;
+    }
+
+    function render(data) {
+      var content = document.getElementById('content');
+      content.innerHTML = '';
+
+      if (data.css) {
+        document.getElementById('user-style').textContent = data.css;
+      }
+
+      if (data.html) {
+        var safe = sanitize(String(data.html));
+        content.appendChild(safe);
+      }
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "id": "scoreboard-sport",
+  "name": "Marcador deportivo",
+  "description": "Marcador con dos equipos, tiempo y resultado",
+  "kind": "scoreboard",
+  "preview_bg": "#1a1a2e",
+  "vars": {
+    "required": ["home_name", "away_name", "home_score", "away_score"],
+    "optional": ["period", "clock", "home_logo_url", "away_logo_url", "sport"]
+  }
+}

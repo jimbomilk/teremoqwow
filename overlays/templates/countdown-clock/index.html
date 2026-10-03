@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: Arial, sans-serif; }
+    #clock {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 100%; height: 100%;
+      background: rgba(5,5,20,0.88); border-radius: 8px;
+    }
+    #label { font-size: 13px; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+    #digits { display: flex; align-items: flex-start; gap: 4px; }
+    .unit { display: flex; flex-direction: column; align-items: center; }
+    .unit-value {
+      font-size: 36px; font-weight: 900; color: #fff;
+      background: rgba(255,255,255,0.08); border-radius: 4px;
+      padding: 4px 10px; min-width: 60px; text-align: center; line-height: 1;
+    }
+    .unit-label { font-size: 10px; color: rgba(255,255,255,0.45); margin-top: 4px; text-transform: uppercase; }
+    .sep { font-size: 36px; font-weight: 900; color: rgba(255,255,255,0.3); padding-top: 4px; }
+    #completed { font-size: 20px; font-weight: 700; color: #4caf50; display: none; }
+  </style>
+</head>
+<body>
+  <div id="clock">
+    <div id="label"></div>
+    <div id="digits">
+      <div class="unit" id="unit-d" style="display:none">
+        <div class="unit-value" id="val-d">00</div>
+        <div class="unit-label">días</div>
+      </div>
+      <span class="sep" id="sep-d" style="display:none">:</span>
+      <div class="unit" id="unit-h" style="display:none">
+        <div class="unit-value" id="val-h">00</div>
+        <div class="unit-label">horas</div>
+      </div>
+      <span class="sep" id="sep-h" style="display:none">:</span>
+      <div class="unit">
+        <div class="unit-value" id="val-m">00</div>
+        <div class="unit-label">min</div>
+      </div>
+      <span class="sep">:</span>
+      <div class="unit">
+        <div class="unit-value" id="val-s">00</div>
+        <div class="unit-label">seg</div>
+      </div>
+    </div>
+    <div id="completed"></div>
+  </div>
+  <script>
+    var completedEl = document.getElementById('completed');
+    var digitsEl = document.getElementById('digits');
+    var labelEl = document.getElementById('label');
+    var timerInterval = null;
+
+    function pad(n) { return String(Math.max(0, n)).padStart(2, '0'); }
+
+    function render(data) {
+      labelEl.textContent = data.label || '';
+      completedEl.textContent = data.completed_text || 'Comenzando…';
+
+      var targetMs = new Date(data.target_iso).getTime();
+      var showDays = data.show_days !== false;
+      var showHours = data.show_hours !== false;
+
+      if (showDays) {
+        document.getElementById('unit-d').style.display = '';
+        document.getElementById('sep-d').style.display = '';
+      }
+      if (showHours || showDays) {
+        document.getElementById('unit-h').style.display = '';
+        document.getElementById('sep-h').style.display = '';
+      }
+
+      function tick() {
+        var diff = Math.max(0, targetMs - Date.now());
+        if (diff <= 0) {
+          clearInterval(timerInterval);
+          digitsEl.style.display = 'none';
+          completedEl.style.display = 'block';
+          return;
+        }
+        var totalS = Math.floor(diff / 1000);
+        var s = totalS % 60;
+        var totalM = Math.floor(totalS / 60);
+        var m = totalM % 60;
+        var totalH = Math.floor(totalM / 60);
+        var h = totalH % 24;
+        var d = Math.floor(totalH / 24);
+        document.getElementById('val-s').textContent = pad(s);
+        document.getElementById('val-m').textContent = pad(m);
+        document.getElementById('val-h').textContent = pad(h);
+        document.getElementById('val-d').textContent = pad(d);
+      }
+
+      tick();
+      timerInterval = setInterval(tick, 1000);
+    }
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "id": "sponsor-banner",
+  "name": "Banner de patrocinador",
+  "description": "Banner centrado con logo de patrocinador y CTA opcional",
+  "kind": "banner",
+  "preview_bg": "#1a1a1a",
+  "vars": {
+    "required": ["advertiser", "image_url"],
+    "optional": ["cta_text", "cta_url"]
+  }
+}

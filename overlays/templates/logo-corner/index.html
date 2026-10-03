@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    #root {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%; cursor: default;
+    }
+    #root.clickable { cursor: pointer; }
+    img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain; display: block;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <img id="logo" src="" alt="">
+  </div>
+  <script>
+    var root = document.getElementById('root');
+    var img = document.getElementById('logo');
+    var linkUrl = null;
+
+    function render(data) {
+      if (data.image_url) img.src = data.image_url;
+      if (data.alt) img.alt = data.alt;
+      if (data.link_url) {
+        linkUrl = data.link_url;
+        root.classList.add('clickable');
+      }
+    }
+
+    root.addEventListener('click', function() {
+      if (linkUrl) {
+        parent.postMessage({ type: 'overlay:action', payload: { kind: 'click', link_url: linkUrl } }, '*');
+      }
+    });
+
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'overlay:data') {
+        render(event.data.payload || {});
+        parent.postMessage({ type: 'overlay:ready' }, '*');
+      }
+    });
+  </script>
+</body>
+</html>

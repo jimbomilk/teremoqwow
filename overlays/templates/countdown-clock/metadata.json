@@ -1,0 +1,11 @@
+{
+  "id": "countdown-clock",
+  "name": "Cuenta atrás hasta evento",
+  "description": "Dígitos grandes con etiquetas DD:HH:MM:SS actualizados por setInterval",
+  "kind": "countdown",
+  "preview_bg": "#0a0a1e",
+  "vars": {
+    "required": ["target_iso"],
+    "optional": ["label", "completed_text", "show_days", "show_hours"]
+  }
+}

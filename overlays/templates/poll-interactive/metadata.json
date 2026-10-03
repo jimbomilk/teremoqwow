@@ -1,0 +1,11 @@
+{
+  "id": "poll-interactive",
+  "name": "Encuesta interactiva",
+  "description": "Pregunta con opciones, resultados, countdown y postMessage de voto",
+  "kind": "poll",
+  "preview_bg": "#0d1117",
+  "vars": {
+    "required": ["question", "options", "duration_ms"],
+    "optional": ["show_results", "allow_change"]
+  }
+}

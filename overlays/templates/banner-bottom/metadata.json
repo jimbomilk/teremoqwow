@@ -1,0 +1,11 @@
+{
+  "id": "banner-bottom",
+  "name": "Banner inferior",
+  "description": "Franja inferior con texto, imagen y CTA opcional",
+  "kind": "banner",
+  "preview_bg": "#1a1a1a",
+  "vars": {
+    "required": ["text"],
+    "optional": ["subtext", "image_url", "cta_text", "cta_url"]
+  }
+}
