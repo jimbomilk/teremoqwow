@@ -269,7 +269,7 @@ services:
     env_file: /home/deploy/.env
     depends_on:
       prometheus:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     logging:
       driver: "json-file"
