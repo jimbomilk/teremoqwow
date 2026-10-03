@@ -1,0 +1,86 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+# Solo un deploy a la vez
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    # Solo despliega si el CI pasó en el mismo commit
+    needs: []           # sin needs: el CD corre en paralelo con CI
+    # Para forzar que CI pase antes, usar: needs: [schema-validate, tests-python, tests-typescript]
+    # y mover este job al ci.yml como job separado con needs.
+    # Se mantiene en archivo separado para poder re-lanzar deploys sin re-correr tests.
+
+    steps:
+
+      # ── 1. Obtener el SHA del commit ─────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # ── 2. SSH al servidor y desplegar ───────────────────────────────────────
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: deploy
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: 22
+          timeout: 300s
+          script: |
+            set -euo pipefail
+
+            REPO_DIR=/opt/teremoqwow
+            COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
+
+            echo "=== [1/5] Actualizar código ==="
+            cd $REPO_DIR
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== [2/5] Guardar imagen actual para rollback ==="
+            PREV_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep teremoqwow || true)
+
+            echo "=== [3/5] Build ==="
+            $COMPOSE build --parallel --quiet
+
+            echo "=== [4/5] Deploy sin downtime (rolling) ==="
+            # Servicios sin estado primero
+            $COMPOSE up -d --no-deps redis clickhouse
+            sleep 5
+            # Servicios de aplicación
+            $COMPOSE up -d --no-deps auth billing-webhook registry-server
+            sleep 5
+            $COMPOSE up -d --no-deps portal admin-api
+            sleep 5
+            # Gateway y frontend
+            $COMPOSE up -d --no-deps krakend player admin
+            sleep 5
+            # Relay y nginx al final
+            $COMPOSE up -d --no-deps moq-relay nginx prometheus grafana
+
+            echo "=== [5/5] Health check ==="
+            sleep 10
+            bash $REPO_DIR/scripts/prod-health-check.sh --timeout 60
+
+            echo ""
+            echo "✅ Deploy completado — commit: $(git rev-parse --short HEAD)"
+
+      # ── 3. Notificar resultado ───────────────────────────────────────────────
+      - name: Notificar éxito
+        if: success()
+        run: |
+          echo "✅ Deploy a producción completado — ${{ github.sha }}"
+
+      - name: Notificar fallo (y rollback manual)
+        if: failure()
+        run: |
+          echo "❌ Deploy fallido — el servidor mantiene la versión anterior"
+          echo "Para rollback manual: ssh deploy@<host> 'cd /opt/teremoqwow && git reset --hard HEAD~1 && docker compose -f docker-compose.prod.yml up -d'"

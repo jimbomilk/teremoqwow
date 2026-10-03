@@ -1,10 +1,14 @@
 name: CI
+
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+
 jobs:
+
+  # ── 1. Validar schemas JSON ─────────────────────────────────────────────────
   schema-validate:
     name: schema-validate
     runs-on: ubuntu-latest
@@ -13,34 +17,53 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Validate JSON schemas
-        run: ./scripts/validate-schemas.sh
+      - run: ./scripts/validate-schemas.sh
 
-  tests:
+  # ── 2. Tests Python ─────────────────────────────────────────────────────────
+  tests-python:
+    name: tests-python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias
+        run: pip install flask flask-cors PyJWT cryptography jsonschema redis pytest anyio
+      - name: Tests auth
+        run: PYTHONPATH="comercial/auth:relay" python3 -m pytest comercial/auth/test_register_privilege_gate.py -v --tb=short
+      - name: Tests admin
+        run: PYTHONPATH="admin/api:relay:comercial/portal" python3 -m pytest admin/test_broadcast_redis.py admin/test_quick_test.py admin/test_overlays_api.py -v --tb=short
+      - name: Tests billing G3
+        run: PYTHONPATH="comercial/portal:relay" python3 -m pytest comercial/billing/test_security_g3.py -v --tb=short
+      - name: Tests relay G4
+        run: PYTHONPATH="relay" python3 -m pytest relay/test_mocha_validator_g4.py -v --tb=short
+      - name: Tests templates overlay
+        run: python3 -m pytest overlays/test_templates.py -v --tb=short
+      - name: Tests player HTML
+        run: python3 -m pytest player/test_player_html.py -v --tb=short
 
-      - name: Rust tests
-        run: |
-          if [ -f Cargo.toml ]; then
-            cargo test --workspace
-          else
-            echo "No Cargo.toml yet, skipping"
-          fi
+  # ── 3. Tests TypeScript ─────────────────────────────────────────────────────
+  tests-typescript:
+    name: tests-typescript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node player/src/moq-watch.test.ts
+      - run: node player/src/overlay-engine.test.ts
 
-      - name: Node tests
+  # ── 4. Build Docker (smoke) ─────────────────────────────────────────────────
+  build-smoke:
+    name: build-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build servicios Python
         run: |
-          if [ -f package.json ]; then
-            npm ci && npm test
-          else
-            echo "No package.json yet, skipping"
-          fi
-
-      - name: Go tests
-        run: |
-          if [ -f go.mod ]; then
-            go test ./...
-          else
-            echo "No go.mod yet, skipping"
-          fi
+          docker build comercial/billing -f comercial/billing/Dockerfile -t teremoqwow/billing:ci
+          docker build comercial/auth -f comercial/auth/Dockerfile -t teremoqwow/auth:ci
+          docker build relay -f relay/Dockerfile -t teremoqwow/registry:ci

@@ -121,3 +121,28 @@ share broadcast="anon/live1":
       VITE_RELAY_BROADCAST={{broadcast}} \
       VITE_MOQ_CERT_HASH=${CERT_HASH} \
       npm run dev -- --host 2>&1
+# ── Producción ──────────────────────────────────────────────────────────────
+
+# Estado de producción (requiere SSH al servidor)
+prod-status host="deploy@teremoqwow.dev":
+    ssh {{host}} "cd /opt/teremoqwow && docker compose -f docker-compose.prod.yml ps"
+
+# Logs de producción
+prod-logs host="deploy@teremoqwow.dev" service="":
+    ssh {{host}} "cd /opt/teremoqwow && docker compose -f docker-compose.prod.yml logs -f {{service}}"
+
+# Health check de producción
+prod-health host="deploy@teremoqwow.dev":
+    ssh {{host}} "bash /opt/teremoqwow/scripts/prod-health-check.sh"
+
+# Reiniciar un servicio en producción
+prod-restart host="deploy@teremoqwow.dev" service="":
+    ssh {{host}} "cd /opt/teremoqwow && docker compose -f docker-compose.prod.yml restart {{service}}"
+
+# Rollback al commit anterior
+prod-rollback host="deploy@teremoqwow.dev":
+    ssh {{host}} "cd /opt/teremoqwow && git reset --hard HEAD~1 && docker compose -f docker-compose.prod.yml up -d"
+
+# Renovar certificados TLS en producción
+prod-certs host="deploy@teremoqwow.dev":
+    ssh {{host}} "certbot renew && docker compose -f /opt/teremoqwow/docker-compose.prod.yml exec nginx nginx -s reload"
