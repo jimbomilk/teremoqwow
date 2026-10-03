@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>teremoqwow Player — Phase 0</title>
+    <title>teremoqwow Player</title>
     <style>
       * {
         margin: 0;
@@ -155,9 +155,21 @@
     </style>
   </head>
   <body>
+    <!-- BEGIN_TITLE_SCRIPT -->
+    <script>
+(function () {
+  var p = new URLSearchParams(location.search);
+  var b = p.get('broadcast');
+  document.title = b ? ('teremoqwow · ' + b.split('/').pop()) : 'teremoqwow Player';
+  if (p.get('embed') === '1' && document.body) document.body.classList.add('embed');
+})();
+    </script>
+    <!-- END_TITLE_SCRIPT -->
     <div class="container">
-      <h1>🎥 teremoqwow Player — Phase 0</h1>
+      <h1>teremoqwow</h1>
 
+      <details>
+      <summary>ℹ️ Info técnica</summary>
       <div class="info">
         <p>
           <strong>Relay URL:</strong> <code>https://127.0.0.1:4443/anon</code> (editar en datos-url)
@@ -174,6 +186,7 @@
           <code style="font-size: 0.8rem;">openssl x509 -in config/relay/certs/relay.pem -noout -fingerprint -sha256 | tr -d ':' | awk -F= '{print tolower($2)}'</code>
         </p>
       </div>
+      </details>
 
       <div class="canvas-container">
         <canvas id="moq-canvas"
