@@ -89,11 +89,8 @@ jobs:
           script: |
             set -eo pipefail
             REPO_DIR=/opt/teremoqwow
-            # Cargar .env ignorando errores de sintaxis y líneas de comentarios
-            while IFS='=' read -r k v; do
-              [[ "$k" =~ ^#.*$ || -z "$k" ]] && continue
-              export "$k"="$v" 2>/dev/null || true
-            done < /home/deploy/.env
+            # Cargar .env — grep elimina comentarios y vacías antes de exportar
+            export $(grep -v '^#' /home/deploy/.env | grep -v '^$' | xargs -d '\n') 2>/dev/null || true
             COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
 
             echo "=== [1/4] Actualizar código ==="
