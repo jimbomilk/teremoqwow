@@ -93,14 +93,31 @@ prometheus (9090)
 
 ---
 
-## Problema conocido: deploy lento (4-10 min)
+## Tiempos de deploy actuales (Solución C activa)
 
-**Causa raíz:** el build de 7 imágenes Docker se hace en producción sin caché entre deploys.
+| Escenario | Tiempo |
+|---|---|
+| Solo `auth` cambia | ~45s |
+| Solo config/schemas | ~15s (restart, sin build) |
+| Solo `deploy.yml` (infra) | ~10s |
+| Todo cambia (force_full) | ~5 min |
+| Sin cambios relevantes | ~5s (skip automático) |
 
-**Solución planificada — GHCR (GitHub Container Registry):**
-- CI buildea y publica imágenes a `ghcr.io/jimbomilk/teremoqwow/{service}:{sha}`
-- Servidor solo hace `docker pull` + `docker compose up -d`
-- Tiempo estimado post-fix: ~45 segundos
+**Mapa de paths → servicios:**
+- `comercial/auth/` → rebuild `auth`
+- `comercial/billing/` → rebuild `billing-webhook`
+- `relay/` → rebuild `registry-server`
+- `admin/` → rebuild `admin-api` + `admin`
+- `player/` → rebuild `player`
+- `docker-compose.prod.yml`, `config/nginx/` → restart `nginx`
+- `config/krakend/`, `schemas/`, `overlays/` → restart `krakend`, `prometheus`, `grafana`
+
+**Quirk conocido del script SSH:** NO usar `set -e` en el bloque `script:` de `appleboy/ssh-action`.
+El `set -e` hace que el proceso SSH salga con status 1 tras el `git reset --hard` aunque el comando
+tenga éxito. El script funciona correctamente sin `set -e`.
+
+**Solución futura — GHCR:** `build-images.yml` ya está preparado para publicar a `ghcr.io`.
+Cuando se active, el servidor solo hará `docker pull` y el deploy bajará a ~30s incluso con rebuild.
 
 ---
 
