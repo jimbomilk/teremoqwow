@@ -26,8 +26,8 @@ services:
       - "4443:4443/tcp"
       - "4444:4444"
     volumes:
-      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/certs/relay.pem:ro
-      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/certs/relay.key:ro
+      - /etc/letsencrypt/live/wow.teremoq.com/fullchain.pem:/certs/relay.pem:ro
+      - /etc/letsencrypt/live/wow.teremoq.com/privkey.pem:/certs/relay.key:ro
     command: >
       --listen [::]:4443
       --listen-tls-cert /certs/relay.pem
@@ -76,7 +76,7 @@ services:
       context: ./comercial/billing
       dockerfile: Dockerfile
     networks: [teremoqwow-prod]
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
       interval: 10s
@@ -93,7 +93,7 @@ services:
       context: ./relay
       dockerfile: Dockerfile
     networks: [teremoqwow-prod]
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     volumes:
       - ./schemas:/schemas:ro
     healthcheck:
@@ -112,7 +112,7 @@ services:
       context: ./comercial/auth
       dockerfile: Dockerfile
     networks: [teremoqwow-prod]
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9002/health"]
       interval: 10s
@@ -129,7 +129,7 @@ services:
       context: ./comercial/portal
       dockerfile: Dockerfile
     networks: [teremoqwow-prod]
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     depends_on:
       auth:
         condition: service_healthy
@@ -168,7 +168,7 @@ services:
       dockerfile: Dockerfile
       target: api
     networks: [teremoqwow-prod]
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     volumes:
       - ./overlays/templates:/app/overlays/templates:ro
     depends_on:
@@ -223,7 +223,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./config/clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
       interval: 10s
@@ -264,7 +264,7 @@ services:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
-    env_file: /etc/teremoqwow/.env
+    env_file: /home/deploy/.env
     depends_on:
       prometheus:
         condition: service_healthy

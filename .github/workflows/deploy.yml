@@ -40,7 +40,7 @@ jobs:
             REPO_DIR=/opt/teremoqwow
             export DOMAIN=wow.teremoq.com
             # Cargar el .env en el entorno del proceso para que compose lo herede
-            set -a; source /etc/teremoqwow/.env; set +a
+            set -a; source /home/deploy/.env; set +a
             COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
 
             echo "=== [1/5] Actualizar código ==="
