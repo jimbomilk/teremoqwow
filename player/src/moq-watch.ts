@@ -1,6 +1,6 @@
-import { estimateNTPOffset, calculateLatency, formatLatency } from './latency';
-import { AbrController, DEFAULT_RENDITIONS, type Rendition } from './abr';
-import { OverlaySyncScheduler, type TimingDeviation } from './overlay-sync';
+import { estimateNTPOffset, calculateLatency, formatLatency } from './latency.ts';
+import { AbrController, DEFAULT_RENDITIONS, type Rendition } from './abr.ts';
+import { OverlaySyncScheduler, type TimingDeviation } from './overlay-sync.ts';
 
 /** Fetches cert hash from KrakenD /cert-hash, falling back to a provided getter. */
 export async function fetchCertHash(
@@ -56,7 +56,171 @@ interface InteractionEvent {
   winner_option_id?: string;
 }
 
-export class MoQWatch extends HTMLElement {
+// ─── Exported pure logic (no DOM dependency — importable in Node tests) ───────
+
+export type PlayerState = 'connecting' | 'live' | 'error' | 'unavailable';
+
+/** Builds the shadow-DOM HTML for the moq-watch component. Exported for testing. */
+export function buildShadowHtml(isEmbed: boolean): string {
+  const overlayClass = isEmbed ? 'status-connecting embed' : 'status-connecting';
+  const hudClass = isEmbed ? 'hud-visible' : 'hud-hidden';
+  return `<style>
+      :host {
+        display: block; width: 100%; aspect-ratio: 16 / 9;
+        background: #000; border-radius: 8px; overflow: hidden; position: relative;
+      }
+      canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
+      #overlay-container {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        pointer-events: none; z-index: 10;
+      }
+      #overlay-container iframe { width: 100%; height: 100%; border: none; pointer-events: auto; }
+      #status-overlay {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: rgba(0,0,0,0.75); color: #fff; z-index: 20; gap: 12px;
+        transition: opacity 1s;
+      }
+      #status-overlay.status-live { opacity: 0; pointer-events: none; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .status-spinner {
+        width: 36px; height: 36px;
+        border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff;
+        border-radius: 50%; animation: spin 0.8s linear infinite;
+      }
+      .status-live .status-spinner,
+      .status-error .status-spinner,
+      .status-unavailable .status-spinner { display: none; }
+      .status-text { font-size: 14px; text-align: center; }
+      .status-retry {
+        padding: 6px 16px; background: #ef5350; border: none;
+        border-radius: 4px; color: #fff; cursor: pointer; font-size: 13px; display: none;
+      }
+      .status-error .status-retry,
+      .status-unavailable .status-retry { display: block; }
+      #status-overlay.embed .status-text { font-size: 11px; }
+      #hud {
+        position: absolute; bottom: 8px; right: 8px;
+        background: rgba(0,0,0,0.65); color: #fff; font-size: 11px;
+        padding: 3px 8px; border-radius: 4px; font-family: monospace;
+        transition: opacity 0.2s; pointer-events: none; z-index: 15;
+      }
+      .hud-hidden { opacity: 0; }
+      .hud-visible { opacity: 1; }
+      .hud-latency-warn { color: #ef5350; }
+      .hud-sep { margin: 0 4px; opacity: 0.5; }
+    </style>
+    <canvas width="1280" height="720"></canvas>
+    <div id="status-overlay" class="${overlayClass}">
+      <div class="status-spinner"></div>
+      <div class="status-text">Conectando al relay\u2026</div>
+      <button class="status-retry">\u21ba Reintentar</button>
+    </div>
+    <div id="hud" class="${hudClass}">
+      <span id="hud-quality">\u2014</span>
+      <span class="hud-sep">|</span>
+      <span id="hud-latency">\u2014 ms</span>
+    </div>
+    <div id="overlay-container"></div>`;
+}
+
+/** Pure player state machine — no DOM dependency. */
+export class PlayerLogic {
+  state: PlayerState = 'connecting';
+  reconnectAttempt = 0;
+  reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly BACKOFF_MS: readonly number[] = [2000, 5000, 10000, 30000, 60000];
+  viewerToken: string | null = null;
+
+  handleReady(): void {
+    this.state = 'live';
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  handleError(scheduleTimeout: (delay: number) => ReturnType<typeof setTimeout>): void {
+    if (this.reconnectAttempt >= this.BACKOFF_MS.length) {
+      this.state = 'unavailable';
+      return;
+    }
+    this.state = 'error';
+    const delay = this.BACKOFF_MS[this.reconnectAttempt++];
+    this.reconnectTimer = scheduleTimeout(delay);
+  }
+
+  cleanup(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  async acquireToken(fetchImpl: typeof fetch = fetch): Promise<void> {
+    try {
+      const r = await fetchImpl('/auth/token-anonymous', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (r.ok) {
+        const d = await r.json();
+        this.viewerToken = (d as any).access_token ?? null;
+      }
+    } catch (_) {}
+  }
+
+  async submitVote(
+    voteData: unknown,
+    broadcastName: string,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<boolean> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.viewerToken) {
+      headers['Authorization'] = `Bearer ${this.viewerToken}`;
+    }
+    try {
+      const r = await fetchImpl('/interactions', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ broadcast: broadcastName, kind: 'vote', payload: voteData }),
+      });
+      return r.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+/** Pure HUD state — no DOM dependency. */
+export class HudState {
+  latencyMs: number | null = null;
+  latencyWarn = false;
+  qualityText = '\u2014';
+
+  onLatency(latency_ms: number): void {
+    this.latencyMs = latency_ms;
+    this.latencyWarn = latency_ms > 700;
+  }
+
+  onAbr(to: string, throughput_kbps: number): void {
+    this.qualityText = `${to} ${(throughput_kbps / 1000).toFixed(1)} Mbps`;
+  }
+
+  get latencyText(): string {
+    return this.latencyMs !== null ? `${this.latencyMs} ms` : '\u2014 ms';
+  }
+}
+
+// ─── Web Component ────────────────────────────────────────────────────────────
+
+const _HTMLElementBase = (
+  typeof HTMLElement !== 'undefined' ? HTMLElement : EventTarget
+) as typeof HTMLElement;
+
+export class MoQWatch extends _HTMLElementBase {
   private canvas: HTMLCanvasElement | null = null;
   private connection: any = null; // Watch.Net.Connection
   private player: any = null; // Watch.Player
@@ -72,14 +236,19 @@ export class MoQWatch extends HTMLElement {
   private interactionSubscription: any = null; // Suscripción al track 'interaction'
   private overlaySync: OverlaySyncScheduler | null = null; // Scheduler de sync de overlays
   private currentPtsMs: number = 0; // PTS actual del vídeo (actualizado por sync track)
+  private _logic = new PlayerLogic();
+  private _hud = new HudState();
 
   constructor() {
     super();
-    this.attachShadow({ mode: 'open' });
+    if (typeof (this as any).attachShadow === 'function') {
+      this.attachShadow({ mode: 'open' });
+    }
   }
 
-  connectedCallback() {
+  async connectedCallback(): Promise<void> {
     this.render();
+    await this._logic.acquireToken();
     this.init();
   }
 
@@ -91,45 +260,52 @@ export class MoQWatch extends HTMLElement {
     return fetchCertHash(() => this.getAttribute('cert-hash'));
   }
 
-  private render() {
+  private render(): void {
     if (!this.shadowRoot) return;
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host {
-          display: block;
-          width: 100%;
-          aspect-ratio: 16 / 9;
-          background: #000;
-          border-radius: 8px;
-          overflow: hidden;
-          position: relative;
-        }
-        canvas {
-          width: 100%;
-          height: 100%;
-          display: block;
-          object-fit: contain;
-        }
-        #overlay-container {
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-          z-index: 10;
-        }
-        #overlay-container iframe {
-          width: 100%;
-          height: 100%;
-          border: none;
-          pointer-events: auto;
-        }
-      </style>
-      <canvas width="1280" height="720"></canvas>
-      <div id="overlay-container"></div>
-    `;
+    const isEmbed = this.getAttribute('embed') === '1';
+    this.shadowRoot.innerHTML = buildShadowHtml(isEmbed);
     this.canvas = this.shadowRoot.querySelector('canvas');
+
+    // Wire retry button
+    const retryBtn = this.shadowRoot.querySelector('.status-retry') as HTMLButtonElement | null;
+    retryBtn?.addEventListener('click', () => {
+      this._logic.reconnectAttempt = 0;
+      this._setState('connecting');
+      this.init();
+    });
+
+    // HUD hover visibility (non-embed mode only)
+    if (!isEmbed) {
+      this.addEventListener('mouseenter', () => {
+        const hud = this.shadowRoot?.querySelector('#hud');
+        if (hud) { hud.classList.remove('hud-hidden'); hud.classList.add('hud-visible'); }
+      });
+      this.addEventListener('mouseleave', () => {
+        const hud = this.shadowRoot?.querySelector('#hud');
+        if (!hud) return;
+        setTimeout(() => {
+          hud.classList.remove('hud-visible');
+          hud.classList.add('hud-hidden');
+        }, 3000);
+      });
+    }
+
+    // Update HUD on telemetry events (dispatched on self)
+    this.addEventListener('moq:latency', (e: Event) => {
+      const { latency_ms } = (e as CustomEvent).detail;
+      this._hud.onLatency(latency_ms);
+      this._updateHud();
+      if (!isEmbed) {
+        const hud = this.shadowRoot?.querySelector('#hud');
+        if (hud) { hud.classList.remove('hud-hidden'); hud.classList.add('hud-visible'); }
+      }
+    });
+
+    this.addEventListener('moq:abr', (e: Event) => {
+      const { to, throughput_kbps } = (e as CustomEvent).detail;
+      this._hud.onAbr(to, throughput_kbps);
+      this._updateHud();
+    });
   }
 
   private async init() {
@@ -221,6 +397,8 @@ export class MoQWatch extends HTMLElement {
         })
       );
 
+      this._setState('live');
+      this._logic.handleReady();
       this.frameCount++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -231,6 +409,7 @@ export class MoQWatch extends HTMLElement {
           bubbles: true,
         })
       );
+      this._scheduleReconnect();
     }
   }
 
@@ -331,43 +510,28 @@ export class MoQWatch extends HTMLElement {
   }
 
   /**
-   * Envía un voto del usuario al servidor vía POST /interactions
+   * Envía un voto del usuario al servidor vía POST /interactions.
+   * Usa Bearer token del viewer si está disponible; si no, intenta sin auth.
    */
-  private async submitVote(voteData: any) {
+  private async submitVote(voteData: unknown): Promise<void> {
     try {
       const broadcast = this.getAttribute('name') || 'anon/live1';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this._logic.viewerToken) {
+        headers['Authorization'] = `Bearer ${this._logic.viewerToken}`;
+      }
+      const payload: Record<string, unknown> = { broadcast, kind: 'vote', payload: voteData };
       const sessionToken = this.getAttribute('session-token');
-
-      if (!sessionToken) {
-        console.warn('[MoQWatch] No session token; cannot submit vote');
-        return;
-      }
-
-      const payload: any = {
-        broadcast,
-        session_token: sessionToken,
-        kind: 'vote',
-        payload: voteData,
-      };
-
-      // Incluir timestamp y client_id si están disponibles
+      if (sessionToken) payload['session_token'] = sessionToken;
       const clientId = this.getAttribute('client-id');
-      if (clientId) {
-        payload.client_id = clientId;
-      }
-
+      if (clientId) payload['client_id'] = clientId;
       const response = await fetch('/interactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
-
-      if (!response.ok) {
-        throw new Error(`Vote submission failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.info('[MoQWatch] Vote submitted successfully:', result);
+      if (!response.ok) throw new Error(`Vote submission failed: ${response.status}`);
+      console.info('[MoQWatch] Vote submitted:', await response.json());
     } catch (error) {
       console.error('[MoQWatch] Error submitting vote:', error);
     }
@@ -533,6 +697,7 @@ export class MoQWatch extends HTMLElement {
 
   private cleanup() {
     try {
+      this._logic.cleanup();
       if (this.abrTickInterval !== null) {
         clearInterval(this.abrTickInterval);
         this.abrTickInterval = null;
@@ -609,6 +774,68 @@ export class MoQWatch extends HTMLElement {
     this.segmentBytesAccumulated = 0;
   }
 
+  private _setState(state: PlayerState): void {
+    this._logic.state = state;
+    const overlay = this.shadowRoot?.querySelector('#status-overlay') as HTMLElement | null;
+    if (!overlay) return;
+    overlay.classList.remove('status-connecting', 'status-live', 'status-error', 'status-unavailable');
+    overlay.classList.add(`status-${state}`);
+    const textEl = overlay.querySelector('.status-text') as HTMLElement | null;
+    if (textEl) {
+      const labels: Record<PlayerState, string> = {
+        connecting: 'Conectando al relay…',
+        live: '🔴 EN DIRECTO',
+        error: 'Error de conexión. Reconectando…',
+        unavailable: 'Stream no disponible',
+      };
+      textEl.textContent = labels[state];
+    }
+    if (state === 'live') {
+      setTimeout(() => { (overlay as HTMLElement).style.display = 'none'; }, 3000);
+    }
+  }
+
+  private _scheduleReconnect(): void {
+    this._logic.handleError((delay) => {
+      this._startCountdown(delay);
+      return setTimeout(() => this.init(), delay);
+    });
+    this._setState(this._logic.state); // sync DOM to what handleError set
+  }
+
+  private _startCountdown(delayMs: number): void {
+    const overlay = this.shadowRoot?.querySelector('#status-overlay');
+    const textEl = overlay?.querySelector('.status-text') as HTMLElement | null;
+    if (!textEl) return;
+    let remaining = Math.ceil(delayMs / 1000);
+    textEl.textContent = `Reconectando en ${remaining}s…`;
+    const iv = setInterval(() => {
+      remaining--;
+      if (remaining > 0) {
+        textEl.textContent = `Reconectando en ${remaining}s…`;
+      } else {
+        clearInterval(iv);
+        textEl.textContent = 'Reconectando…';
+      }
+    }, 1000);
+  }
+
+  private _updateHud(): void {
+    const hud = this.shadowRoot?.querySelector('#hud');
+    if (!hud) return;
+    const latencyEl = hud.querySelector('#hud-latency') as HTMLElement | null;
+    if (latencyEl) {
+      latencyEl.textContent = this._hud.latencyText;
+      if (this._hud.latencyWarn) {
+        latencyEl.classList.add('hud-latency-warn');
+      } else {
+        latencyEl.classList.remove('hud-latency-warn');
+      }
+    }
+    const qualityEl = hud.querySelector('#hud-quality') as HTMLElement | null;
+    if (qualityEl) qualityEl.textContent = this._hud.qualityText;
+  }
+
   /**
    * Estima bytes decodificados por tick ABR
    * En un escenario real, estos datos vendrían de eventos del decoder
@@ -630,5 +857,6 @@ export class MoQWatch extends HTMLElement {
   }
 }
 
-// Registrar el custom element para que pueda usarse en HTML
-customElements.define('moq-watch', MoQWatch);
+if (typeof customElements !== 'undefined') {
+  customElements.define('moq-watch', MoQWatch);
+}
