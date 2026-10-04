@@ -51,6 +51,8 @@ jobs:
         env:
           SKIP_NETEM: "1"
           WINDOW_SEC: "15"
+          SKIP_REMOTE_CHECK: "1"
+          SKIP_REMOTE_LATENCY: "1"
 
       - name: Cleanup
         if: always()
@@ -70,7 +72,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install flask PyJWT cryptography jsonschema redis 2>/dev/null
+        run: pip install flask flask-cors PyJWT cryptography jsonschema redis 2>/dev/null
 
       - name: Generate RSA key for tests
         run: |
@@ -137,8 +139,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install PyJWT
-        run: pip install PyJWT cryptography 2>/dev/null
+      - name: Install dependencies
+        run: pip install PyJWT cryptography jsonschema 2>/dev/null
 
       - name: Create Docker network
         run: docker network create teremoqwow-e2e 2>/dev/null || true
