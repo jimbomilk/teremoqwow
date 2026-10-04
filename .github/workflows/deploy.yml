@@ -86,6 +86,8 @@ jobs:
           key: ${{ secrets.PROD_SSH_KEY }}
           port: 22
           timeout: 600s
+          # envs lista las variables de env: que se inyectan en el script SSH
+          envs: CHANGED_AUTH,CHANGED_BILLING,CHANGED_PORTAL,CHANGED_REGISTRY,CHANGED_ADMIN,CHANGED_PLAYER,CHANGED_INFRA,CHANGED_CONFIG,FORCE_FULL
           script: |
             REPO_DIR=/opt/teremoqwow
             # Cargar .env — grep elimina comentarios y vacías antes de exportar
