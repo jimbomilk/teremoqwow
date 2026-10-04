@@ -55,6 +55,7 @@ const httpsConfig = process.env.VITE_HTTPS === '1' && fs.existsSync(`${CERT_DIR}
   : undefined;
 
 export default defineConfig({
+  base: './',
   plugins: [metricsLatencyPlugin()],
   server: {
     host: true,

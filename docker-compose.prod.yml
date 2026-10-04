@@ -154,8 +154,9 @@ services:
       dockerfile: Dockerfile
       target: prod
       args:
-        VITE_MOQ_RELAY_URL: wss://wow.teremoq.com:4443/anon
+        VITE_MOQ_RELAY_URL: https://wow.teremoq.com:4443/anon
         VITE_RELAY_BROADCAST: anon/live1
+        VITE_MOQ_CERT_HASH: ""
     networks: [teremoqwow-prod]
     depends_on:
       moq-relay:
