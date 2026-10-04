@@ -21,7 +21,7 @@ FROM nginx:alpine AS frontend
 
 COPY src/index.html /usr/share/nginx/html/admin/index.html
 COPY src/admin.css  /usr/share/nginx/html/admin/admin.css
-COPY src/admin.js   /usr/share/nginx/html/admin/admin.js
+COPY src/js/        /usr/share/nginx/html/admin/js/
 
 # nginx config para SPA: /admin/* → index.html, /admin/api/* → proxy a :9004
 COPY nginx.conf /etc/nginx/conf.d/default.conf
