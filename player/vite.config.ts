@@ -71,19 +71,9 @@ export default defineConfig({
   },
   build: {
     target: 'ES2020',
-    lib: {
-      entry: 'src/main.ts',
-      name: 'TeremoqwowPlayer',
-      fileName: (format) => `player.${format === 'es' ? 'js' : 'umd.js'}`,
-    },
+    outDir: 'dist',
     rollupOptions: {
-      external: ['@moq/watch', '@moq/signals'],
-      output: {
-        globals: {
-          '@moq/watch': 'MoQWatch',
-          '@moq/signals': 'MoQSignals',
-        },
-      },
+      input: 'index.html',
     },
   },
   define: {
