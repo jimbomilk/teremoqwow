@@ -175,6 +175,7 @@ services:
     env_file: /home/deploy/.env
     volumes:
       - ./overlays/templates:/app/overlays/templates:ro
+      - /home/deploy/private.pem:/home/deploy/private.pem:ro
     depends_on:
       auth:
         condition: service_started
