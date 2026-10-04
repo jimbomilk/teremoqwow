@@ -1,7 +1,7 @@
 ---
 name: Arquitecto
 description: Diseña la arquitectura, define contratos, delega la implementación al agente developer y publica cambios en GitHub.
-model: 'Claude Sonnet 4.6 (anthropic)'
+model: 'Claude 3.5 Sonnet (anthropic)'
 tools: ['read', 'edit', 'search', 'execute', 'github/*', 'agent'] # Único agente con terminal, GitHub MCP y capacidad de delegar
 agents: # El Arquitecto delega únicamente al developer (que a su vez invoca a los refuters)
   - developer
