@@ -1,7 +1,7 @@
 ---
 name: refuter-correctness
 description: "Adversarial reviewer — correctness lens. Ataca un diff verde buscando defectos en boundaries y error paths, y exige que cualquier gate casero demuestre que puede tanto fallar como pasar. Contexto fresco, mandato de refutar."
-model: claude-sonnet-4-6
+model: claude-sonnet-5.5
 tools: ['read', 'search']
 ---
 

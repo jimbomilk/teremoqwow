@@ -1,7 +1,7 @@
 ---
 name: refuter-security
 description: "Adversarial reviewer — security and privacy lens. Caza input no confiable llegando a un sink, gaps de autorización, secretos filtrados y datos que escapan donde no deben. Contexto fresco, mandato de refutar."
-model: claude-sonnet-4-6
+model: claude-sonnet-5.5
 tools: ['read', 'search']
 ---
 
