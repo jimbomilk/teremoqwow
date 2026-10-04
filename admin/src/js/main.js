@@ -8,7 +8,8 @@ import './pages/monitor.js';
 
 const _host = window.location.hostname || 'localhost';
 window.MOQ_RELAY_URL = `https://${_host}:4443/anon`;
-window.PLAYER_URL    = `https://${_host}:5443`;
+// En prod el player está en /player/ (nginx); en dev en :5173
+window.PLAYER_URL    = window.location.port ? `https://${_host}:5443` : `${window.location.origin}/player`;
 window.AUTH_URL      = window.AUTH_URL || '';
 
 (async () => {
