@@ -115,6 +115,8 @@ services:
       dockerfile: Dockerfile
     networks: [teremoqwow-prod]
     env_file: /home/deploy/.env
+    volumes:
+      - /home/deploy/private.pem:/home/deploy/private.pem:ro
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 9002"]
       interval: 10s
