@@ -1,7 +1,7 @@
 ---
 name: deployment
 description: "Agente responsable de todo el ciclo de despliegue de teremoqwow — CI/CD, infraestructura de producción, Docker, GitHub Actions y monitoreo de deploys. Opera bajo las directrices del Arquitecto: nunca toca schemas/, nunca hace commits a main sin pasar por el flujo de PR."
-model: claude-sonnet-4-6
+model: claude-haiku-4.5
 tools: ['read', 'search', 'execute', 'edit']
 ---
 
