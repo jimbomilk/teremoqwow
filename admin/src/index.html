@@ -152,7 +152,7 @@
 </div>
 
 <script>
-const API = window.ADMIN_API_URL || 'http://localhost:9004';
+const API = window.ADMIN_API_URL || '/admin-api';
 let token = localStorage.getItem('admin_token') || '';
 let currentPage = 'broadcasts';
 
@@ -161,6 +161,7 @@ let currentPage = 'broadcasts';
 const _host = window.location.hostname || 'localhost';
 window.MOQ_RELAY_URL = `https://${_host}:4443/anon`;
 window.PLAYER_URL    = `https://${_host}:5443`;
+window.AUTH_URL      = window.AUTH_URL || '';
 (async () => {
   try {
     const r = await fetch(`${API}/admin/relay/cert-hash`);
@@ -195,7 +196,7 @@ async function api(path, opts = {}) {
 async function login() {
   const email = document.getElementById('login-email').value;
   const pass  = document.getElementById('login-password').value;
-  const authUrl = window.AUTH_URL || 'http://localhost:9002';
+  const authUrl = window.AUTH_URL || '/auth';
   try {
     const r = await fetch(`${authUrl}/auth/login`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
