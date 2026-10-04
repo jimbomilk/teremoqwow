@@ -90,8 +90,12 @@ jobs:
           envs: CHANGED_AUTH,CHANGED_BILLING,CHANGED_PORTAL,CHANGED_REGISTRY,CHANGED_ADMIN,CHANGED_PLAYER,CHANGED_INFRA,CHANGED_CONFIG,FORCE_FULL
           script: |
             REPO_DIR=/opt/teremoqwow
+            # Guardar FORCE_FULL ANTES del export del .env (que podría pisarla)
+            _FORCE_FULL="${FORCE_FULL:-}"
             # Cargar .env — grep elimina comentarios y vacías antes de exportar
             export $(grep -v '^#' /home/deploy/.env | grep -v '^$' | xargs -d '\n') 2>/dev/null || true
+            # Restaurar FORCE_FULL si fue inyectada por envs:
+            if [ -n "$_FORCE_FULL" ]; then FORCE_FULL="$_FORCE_FULL"; fi
             COMPOSE="docker compose -f $REPO_DIR/docker-compose.prod.yml"
 
             echo "=== [1/4] Actualizar código ==="
@@ -102,12 +106,12 @@ jobs:
             NEW_SHA=$(git rev-parse --short HEAD)
             echo "  $PREV_SHA -> $NEW_SHA"
 
-            # Variables inyectadas por env: del step
-            FORCE_FULL=${FORCE_FULL:-false}
+            # true si se pasó force_full=true en workflow_dispatch
+            FORCE_FULL="${FORCE_FULL:-false}"
             BUILD_SERVICES=""
             RESTART_SERVICES=""
 
-            if [ "$FORCE_FULL" = "true" ]; then
+            if [ "$FORCE_FULL" = "true" ] || [ "$FORCE_FULL" = "1" ] || [ "$FORCE_FULL" = "yes" ]; then
               echo "=== Forzando deploy completo ==="
               BUILD_SERVICES="auth billing-webhook portal registry-server admin-api admin player"
               RESTART_SERVICES="redis clickhouse moq-relay krakend nginx prometheus grafana"
