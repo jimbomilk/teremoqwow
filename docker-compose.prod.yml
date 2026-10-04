@@ -153,10 +153,10 @@ services:
       context: ./player
       dockerfile: Dockerfile
       target: prod
+      args:
+        VITE_MOQ_RELAY_URL: wss://wow.teremoq.com:4443/anon
+        VITE_RELAY_BROADCAST: anon/live1
     networks: [teremoqwow-prod]
-    environment:
-      VITE_MOQ_RELAY_URL: wss://wow.teremoq.com:4443/anon
-      VITE_RELAY_BROADCAST: anon/live1
     depends_on:
       moq-relay:
         condition: service_started

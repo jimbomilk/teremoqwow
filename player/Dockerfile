@@ -14,6 +14,12 @@ CMD ["npm", "run", "dev"]
 # ── Production build ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
 
+# Build-time vars que Vite sustituye en el bundle
+ARG VITE_MOQ_RELAY_URL=wss://localhost:4443/anon
+ARG VITE_RELAY_BROADCAST=anon/live1
+ENV VITE_MOQ_RELAY_URL=$VITE_MOQ_RELAY_URL
+ENV VITE_RELAY_BROADCAST=$VITE_RELAY_BROADCAST
+
 WORKDIR /app
 COPY package.json ./
 RUN npm install --production=false
