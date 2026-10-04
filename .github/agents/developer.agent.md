@@ -1,7 +1,7 @@
 ---
 name: developer
 description: "Único ejecutor de desarrollo de teremoqwow. Convierte el contrato aprobado por el Arquitecto en código tested bajo TDD estricto (RED→GREEN→REFACTOR), cubriendo todos los dominios del proyecto. Invoca a los 3 refuters en paralelo antes de entregar."
-model: gpt-4o-mini
+model: claude-sonnet-5.5
 tools: ['read', 'edit', 'search', 'execute']
 agents: ['refuter-correctness', 'refuter-security', 'refuter-tests']
 ---
