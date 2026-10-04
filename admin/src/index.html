@@ -196,7 +196,7 @@ async function api(path, opts = {}) {
 async function login() {
   const email = document.getElementById('login-email').value;
   const pass  = document.getElementById('login-password').value;
-  const authUrl = window.AUTH_URL || '/auth';
+  const authUrl = window.AUTH_URL || '';
   try {
     const r = await fetch(`${authUrl}/auth/login`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
