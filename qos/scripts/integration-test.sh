@@ -207,6 +207,29 @@ fi
 # 3. Verificar track de sincronía (issue #65)
 ##############################################################################
 
+log "--- MEDIA READINESS: audio/video frames (deadline 30s) ---"
+  _readiness_output=$(mktemp)
+  set +e
+  BROADCAST="$BROADCAST" WINDOW_SEC="$WINDOW_SEC" RELAY_HOST="$RELAY_HOST" \
+    LIPSYNC_READINESS_ONLY=1 \
+    timeout 30 bash "${SCRIPT_DIR}/verify-lipsync.sh" \
+    >"$_readiness_output" 2>&1
+  _readiness_rc=$?
+  set -e
+  cat "$_readiness_output"
+  if [[ "$_readiness_rc" -ne 0 ]]; then
+    if grep -Eq '\[QOS-DIAGNOSTIC\] stage=.*exit=[1-9][0-9]*' "$_readiness_output"; then
+      fail "Media readiness TOOL_ERROR"
+    else
+      fail "Media readiness DATA_PATH_FAILURE"
+    fi
+    rm -f "$_readiness_output"
+    echo "  ========== RESULT: FAIL =========="
+    exit 1
+fi
+rm -f "$_readiness_output"
+log "Media readiness READY: audio_frames>0 and video_frames>0"
+
 log "--- CHECK 1/4: Track de sincronía ---"
 if MOQ_NAMESPACE="$BROADCAST" bash "${SCRIPT_DIR}/verify-sync-track.sh"; then
   pass "Track de sincronía (≥3 pulsos en 5s)"
@@ -254,15 +277,14 @@ log "--- CHECK 4/4: Latencia glass-to-glass (${WINDOW_SEC}s) ---"
 set +e
 MEASURE_BROADCAST="$BROADCAST" ENCODER_START_MS="$ENCODER_START_MS" \
   DURATION="$WINDOW_SEC" SKIP_INJECT=1 \
-  bash "${SCRIPT_DIR}/measure-e2e.sh" 2>/dev/null
+  bash "${SCRIPT_DIR}/measure-e2e.sh"
 MEASURE_RC=$?
 set -e
 case "$MEASURE_RC" in
   0) pass "Latencia glass-to-glass P95 ≤ 700ms" ;;
-  2) log "[INTEGRATION] ⚠ WARN: Latencia P95 no evaluable con CLI (overhead moq 0.12.7 + ffprobe TS)"
+  2) log "[INTEGRATION] ⚠ INCONCLUSIVE: Latencia P95 no evaluable con CLI (overhead moq 0.12.7 + ffprobe TS)"
      log "[INTEGRATION]   → usa CHECK 5 para medida real del player"
-     PASS_COUNT=$((PASS_COUNT + 1))
-     RESULTS+=("WARN: Latencia P95 inconclusive (CLI overhead — pipeline OK)") ;;
+     fail "Latencia glass-to-glass inconclusive" ;;
   *) fail "Latencia glass-to-glass P95 > 700ms" ;;
 esac
 

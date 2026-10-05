@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/qos-diagnostics.sh"
+
 # Verificador de lip-sync — issue #66
 # Mide el offset audio-vídeo real mediante ffprobe en stream SRT exportado desde MoQ.
 # Valida contra SLA (45ms).
@@ -13,7 +16,7 @@ BROADCAST="${BROADCAST:-anon/live1}"
 THRESHOLD_MS="${THRESHOLD_MS:-45}"
 WINDOW_SEC="${WINDOW_SEC:-10}"
 RELAY_HOST="${RELAY_HOST:-moq-relay}"
-REPORT_FILE="/tmp/lipsync-report.json"
+REPORT_FILE="${LIPSYNC_REPORT_FILE:-/tmp/lipsync-report.json}"
 EXPORT_CONTAINER="lipsync-export"
 EXPORT_PORT="9001"
 
@@ -34,7 +37,13 @@ warn() {
 
 cleanup() {
   log "Cleaning up..."
+  if [[ "${LIPSYNC_READINESS_ONLY:-0}" != "1" && ! -s "$REPORT_FILE" ]]; then
+    generate_report "0" "0" "false" || true
+  fi
   docker rm -f "$EXPORT_CONTAINER" 2>/dev/null || true
+  if [[ -n "${_TMPDIR:-}" ]]; then
+    rm -rf "$_TMPDIR"
+  fi
 }
 
 trap cleanup EXIT
@@ -45,20 +54,50 @@ generate_report() {
   local av_offset_max=$2
   local pass=$3
 
-  cat > "$REPORT_FILE" <<EOF
-{
-  "broadcast": "${BROADCAST}",
-  "measured_at": {
-    "unix_ms": ${MEASURED_AT_MS}
-  },
-  "window_sec": ${WINDOW_SEC},
-  "av_offset_ms_avg": ${av_offset_avg},
-  "av_offset_ms_max": ${av_offset_max},
-  "threshold_ms": ${THRESHOLD_MS},
-  "pass": ${pass}
+  python3 - "$REPORT_FILE" "$BROADCAST" "${MEASURED_AT_MS:-0}" \
+    "$WINDOW_SEC" "$av_offset_avg" "$av_offset_max" "$THRESHOLD_MS" "$pass" <<'PY'
+import json
+import os
+import stat
+import sys
+
+path, broadcast, measured_at, window, average, maximum, threshold, passed = sys.argv[1:]
+report = {
+    "broadcast": broadcast,
+    "measured_at": {"unix_ms": int(measured_at)},
+    "window_sec": int(window),
+    "av_offset_ms_avg": float(average),
+    "av_offset_ms_max": float(maximum),
+    "threshold_ms": float(threshold),
+    "pass": passed == "true",
 }
-EOF
+parent = os.path.dirname(os.path.abspath(path)) or "."
+name = os.path.basename(path)
+dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+dirfd = os.open(parent, dir_flags)
+try:
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, 0o600, dir_fd=dirfd)
+    file_stat = os.fstat(fd)
+    if not stat.S_ISREG(file_stat.st_mode):
+        raise RuntimeError("report path must be regular")
+    if file_stat.st_nlink != 1:
+        raise RuntimeError("report path must be a single-link regular file")
+    os.fchmod(fd, 0o600)
+    os.ftruncate(fd, 0)
+finally:
+    os.close(dirfd)
+with os.fdopen(fd, "w") as handle:
+    json.dump(report, handle, indent=2)
+PY
 }
+
+# Materialize a failure report before starting external tools. This keeps the
+# artifact deterministic even if a decoder/pipe exits during startup.
+if [[ "${LIPSYNC_READINESS_ONLY:-0}" != "1" ]]; then
+  mkdir -p "$(dirname "$REPORT_FILE")"
+  generate_report "0" "0" "false"
+fi
 
 # Verificar que la red y relay están disponibles
 check_relay() {
@@ -117,19 +156,33 @@ log "Exporting MoQ stream via pipe → ffprobe (${WINDOW_SEC}s)..."
 # timeout previene que el pipe bloquee indefinidamente si el broadcast no tiene datos.
 # ffprobe local escribe JSON a tempfile; se parsea leyendo el archivo (evita
 # los problemas de interpolar un JSON multi-KB en heredocs de python -c).
-_TMPJSON=$(mktemp)
+_TMPDIR=$(mktemp -d)
+_TMPJSON="${_TMPDIR}/ffprobe.json"
+_EXPORT_STDERR="${_TMPDIR}/exporter.stderr"
+_FFPROBE_STDERR="${_TMPDIR}/ffprobe.stderr"
+set +e
 docker run --rm \
     --network teremoqwow-e2e \
     moqdev/moq:0.12.7 \
     --connect "tcp://${RELAY_HOST}:4444/anon" \
     --broadcast "${BROADCAST}" \
-    export ts 2>/dev/null | \
+    export ts 2>"$_EXPORT_STDERR" | \
 timeout $((WINDOW_SEC + 5)) ffprobe \
     -v quiet \
     -read_intervals "%+${WINDOW_SEC}" \
     -show_frames \
     -print_format json \
-    pipe:0 2>/dev/null > "$_TMPJSON" || true
+    pipe:0 2>"$_FFPROBE_STDERR" > "$_TMPJSON"
+_PIPE_STATUS=("${PIPESTATUS[@]}")
+set -e
+
+qos_report_tool_diagnostic exporter "${_PIPE_STATUS[0]}" "$_EXPORT_STDERR"
+qos_report_tool_diagnostic ffprobe "${_PIPE_STATUS[1]}" "$_FFPROBE_STDERR"
+if [[ "${_PIPE_STATUS[0]}" -ne 0 || "${_PIPE_STATUS[1]}" -ne 0 ]]; then
+  generate_report "0" "0" "false"
+  warn "export/decoder tool failed; measurement unavailable"
+  exit 1
+fi
 
 log "Parsing PTS from frames ($(wc -c < "$_TMPJSON") bytes)..."
 
@@ -156,7 +209,7 @@ def pts_of(fr):
 vpts = sorted(p for p in (pts_of(f) for f in frames if f.get("media_type")=="video") if p is not None)
 apts = sorted(p for p in (pts_of(f) for f in frames if f.get("media_type")=="audio") if p is not None)
 if not vpts or not apts:
-    print(f"{vpts[0] if vpts else 0} {apts[0] if apts else 0} 0"); sys.exit()
+    print(f"{vpts[0] if vpts else 0} {apts[0] if apts else 0} 0 {len(vpts)} {len(apts)}"); sys.exit()
 import bisect
 diffs = []
 for a in apts:
@@ -167,19 +220,16 @@ for a in apts:
     diffs.append(min(abs(a - v) for v in cand))
 diffs.sort()
 median_ms = int(round(diffs[len(diffs)//2] * 1000))
-print(f"{vpts[0]} {apts[0]} {median_ms}")
+print(f"{vpts[0]} {apts[0]} {median_ms} {len(vpts)} {len(apts)}")
 PYEOF
 )
-rm -f "$_TMPJSON"
-
-read -r VIDEO_PTS AUDIO_PTS AV_MEDIAN_MS <<< "$_PTS_OUT"
+read -r VIDEO_PTS AUDIO_PTS AV_MEDIAN_MS VIDEO_FRAMES AUDIO_FRAMES <<< "$_PTS_OUT"
 
 log "Video PTS: ${VIDEO_PTS}s, Audio PTS: ${AUDIO_PTS}s, A/V median offset: ${AV_MEDIAN_MS}ms"
 
-# Si ambos PTS son 0 significa que no se recibieron frames (broadcast sin datos)
-if [[ "${VIDEO_PTS}" == "0" && "${AUDIO_PTS}" == "0" ]]; then
+if [[ "${VIDEO_FRAMES:-0}" -eq 0 || "${AUDIO_FRAMES:-0}" -eq 0 ]]; then
   generate_report "0" "0" "false"
-  log "FAIL: no frames received (broadcast not publishing data)"
+  log "FAIL: incomplete media frames (audio and video are both required)"
   exit 1
 fi
 
@@ -187,6 +237,13 @@ AV_OFFSET_AVG="${AV_MEDIAN_MS:-0}"
 AV_OFFSET_MAX="$AV_OFFSET_AVG"
 
 log "A/V offset: ${AV_OFFSET_AVG}ms (threshold: ${THRESHOLD_MS}ms)"
+
+# The readiness gate establishes only that both media tracks are present.
+# QoS quality is evaluated by the subsequent measurement check.
+if [[ "${LIPSYNC_READINESS_ONLY:-0}" == "1" ]]; then
+  log "READY: audio/video frames available"
+  exit 0
+fi
 
 # Validar resultado
 if [[ $AV_OFFSET_AVG -lt $THRESHOLD_MS ]]; then

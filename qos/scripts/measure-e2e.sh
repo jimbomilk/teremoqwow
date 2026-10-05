@@ -19,29 +19,63 @@
 
 set -u  # Error on unset variables
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/qos-diagnostics.sh"
+
 # ============================================================================
 # Configuration
 # ============================================================================
 
 DURATION="${DURATION:-300}"              # seconds (5 min default)
+DURATION_CLI_SET=0
 SKIP_INJECT="${SKIP_INJECT:-0}"          # 1 = omitir inyección (stream ya activo)
-LATENCY_OUTPUT_FILE="/tmp/latency-results.csv"
-LATENCY_RAW_FILE="/tmp/latency-raw.jsonl"
-ENCODER_LOG="/tmp/encoder-log.txt"
-TEST_VIDEO="/tmp/test-5min.mp4"
+LATENCY_OUTPUT_FILE=""
+LATENCY_RAW_FILE=""
+ENCODER_LOG=""
+TEST_VIDEO=""
 
 PLAYER_HOST="${PLAYER_HOST:-localhost}"
 PLAYER_PORT="${PLAYER_PORT:-5173}"
 PLAYER_METRICS_URL="http://${PLAYER_HOST}:${PLAYER_PORT}/metrics/latency"
 
 P95_THRESHOLD_MS=700
-# MIN_SAMPLES depende de DURATION: runs cortos de CI (<60s) aceptan 20 muestras
-# (≈2 fps vía CLI). Runs completos (≥300s) exigen 500 muestras mínimo estadístico.
-if [[ "${DURATION}" -ge 300 ]]; then
-  MIN_SAMPLES="${MIN_SAMPLES:-500}"
-else
-  MIN_SAMPLES="${MIN_SAMPLES:-20}"
-fi
+
+validate_duration() {
+  local candidate="${1:-}"
+  if [[ ! "$candidate" =~ ^[0-9]{1,4}$ ]] ||
+     (( 10#$candidate < 1 || 10#$candidate > 3600 )); then
+    printf '[ERROR] Invalid duration: expected a decimal integer from 1 to 3600 seconds\n' >&2
+    return 2
+  fi
+}
+
+normalize_duration() {
+  local normalized="$1"
+  while [[ "$normalized" == 0* && "${#normalized}" -gt 1 ]]; do
+    normalized="${normalized#0}"
+  done
+  printf '%s' "$normalized"
+}
+
+validate_min_samples() {
+  local candidate="${MIN_SAMPLES:-}"
+  local floor=20
+  [[ "${DURATION}" -ge 300 ]] && floor=500
+  if [[ ! "$candidate" =~ ^[1-9][0-9]{0,9}$ ]] ||
+     (( candidate > 2147483647 || candidate < floor )); then
+    printf '[ERROR] Invalid MIN_SAMPLES: expected a positive integer <= 2147483647\n' >&2
+    return 2
+  fi
+}
+
+configure_min_samples() {
+  if [[ "${DURATION}" -ge 300 ]]; then
+    MIN_SAMPLES="${MIN_SAMPLES:-500}"
+  else
+    MIN_SAMPLES="${MIN_SAMPLES:-20}"
+  fi
+  validate_min_samples
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -186,35 +220,74 @@ except Exception:
   local _FRAMES_TXT
   _FRAMES_TXT=$(mktemp)
   local EXPORT_NAME="moq-export-${BASHPID}"
+  local _EXPORT_STDERR _FFPROBE_STDERR _PIPE_STATUS_FILE _CAPTURE_STDERR
+  _EXPORT_STDERR=$(mktemp)
+  _FFPROBE_STDERR=$(mktemp)
+  _PIPE_STATUS_FILE=$(mktemp)
+  _CAPTURE_STDERR=$(mktemp)
 
   # Timestamp cada frame en Unix ms al llegar a ffprobe. Formato: "TS_MS|<compact ffprobe line>"
-  timeout $((duration + 15)) bash -c "
-    docker run --rm --name '${EXPORT_NAME}' \
-      --network '${relay_net}' \
+  local _CAPTURE_RC=0
+  timeout $((duration + 15)) bash -c '
+    docker run --rm --name "$5" \
+      --network "$6" \
       moqdev/moq:0.12.7 \
-      --connect 'tcp://${relay_host}:4444/anon' \
-      --broadcast '${broadcast}' \
-      export ts 2>/dev/null | \
-    timeout $((duration + 5)) ffprobe \
+      --connect "tcp://$7:4444/anon" \
+      --broadcast "$8" \
+      export ts 2>"$1" | \
+    timeout "$(($2 + 5))" ffprobe \
       -v quiet -show_frames -print_format compact \
-      -read_intervals '%+${duration}' \
-      pipe:0 2>/dev/null | \
-    grep --line-buffered 'media_type=video' | \
+      -read_intervals "%+$2" \
+      pipe:0 2>"$3" | \
+    grep --line-buffered "media_type=video" | \
     while IFS= read -r line; do
-      printf '%s|%s\n' \"\$(python3 -c 'import time; print(int(time.time()*1000))')\" \"\$line\"
+      printf "%s|%s\n" "$(python3 -c "import time; print(int(time.time()*1000))")" "$line"
     done
-  " > "$_FRAMES_TXT" 2>/dev/null || true
+    pipeline_status=("${PIPESTATUS[@]}")
+    printf "%s\n" "${pipeline_status[@]}" > "$4"
+  ' _ "$_EXPORT_STDERR" "$duration" "$_FFPROBE_STDERR" \
+    "$_PIPE_STATUS_FILE" "$EXPORT_NAME" "$relay_net" "$relay_host" "$broadcast" \
+    > "$_FRAMES_TXT" 2>"$_CAPTURE_STDERR" || _CAPTURE_RC=$?
+
+  local _EXPORT_RC=1
+  local _FFPROBE_RC=1
+  if [[ -s "$_PIPE_STATUS_FILE" ]]; then
+    local -a _PIPE_STATUS=()
+    mapfile -t _PIPE_STATUS < "$_PIPE_STATUS_FILE"
+    _EXPORT_RC="${_PIPE_STATUS[0]:-1}"
+    _FFPROBE_RC="${_PIPE_STATUS[1]:-1}"
+  fi
+  qos_report_tool_diagnostic exporter "$_EXPORT_RC" "$_EXPORT_STDERR"
+  qos_report_tool_diagnostic ffprobe "$_FFPROBE_RC" "$_FFPROBE_STDERR"
+  if [[ "$_CAPTURE_RC" -ne 0 ]]; then
+    qos_report_tool_diagnostic measurement "$_CAPTURE_RC" "$_CAPTURE_STDERR"
+  fi
   docker rm -f "$EXPORT_NAME" 2>/dev/null || true
 
+  if [[ "$_CAPTURE_RC" -ne 0 || ! -s "$_PIPE_STATUS_FILE" ||
+        "$_EXPORT_RC" -ne 0 || "$_FFPROBE_RC" -ne 0 ]]; then
+    rm -f "$_FRAMES_TXT" "$_EXPORT_STDERR" "$_FFPROBE_STDERR" \
+      "$_PIPE_STATUS_FILE" "$_CAPTURE_STDERR"
+    log_error "Exporter/decoder failed; latency measurement unavailable"
+    return 1
+  fi
+
+  local invalid_timing=0
   while IFS='|' read -r ts_ms rest; do
     for field in $(echo "$rest" | tr '|' ' '); do
       if [[ "$field" == pts_time=* ]]; then
-        pts_ms=$(python3 -c "print(int(float('${field#*=}') * 1000))" 2>/dev/null || echo 0)
-        latency_ms=$(python3 -c "
+        if ! pts_ms=$(python3 -c "value=float('${field#*=}'); print(int(value * 1000))" 2>/dev/null); then
+          invalid_timing=1
+          break
+        fi
+        if ! latency_ms=$(python3 -c "
 produced = $CREATION_UNIX_MS + $pts_ms
 lat = $ts_ms - produced
-print(max(0, lat))" 2>/dev/null || echo 0)
-        if [[ "$latency_ms" -ge 0 && "$latency_ms" -lt 60000 ]]; then
+print(lat)" 2>/dev/null); then
+          invalid_timing=1
+        elif [[ "$latency_ms" -lt 0 || "$latency_ms" -ge 60000 ]]; then
+          invalid_timing=1
+        else
           echo "$latency_ms" >> "$output_file"
           echo "{\"timestamp_ms\": $ts_ms, \"latency_ms\": $latency_ms, \"pts_ms\": $pts_ms}" >> "$LATENCY_RAW_FILE"
         fi
@@ -222,7 +295,14 @@ print(max(0, lat))" 2>/dev/null || echo 0)
       fi
     done
   done < "$_FRAMES_TXT"
-  rm -f "$_FRAMES_TXT"
+  if [[ "$invalid_timing" -ne 0 ]]; then
+    rm -f "$_FRAMES_TXT" "$_EXPORT_STDERR" "$_FFPROBE_STDERR" \
+      "$_PIPE_STATUS_FILE" "$_CAPTURE_STDERR"
+    log_error "Invalid capture timing; measurement unavailable"
+    return 1
+  fi
+  rm -f "$_FRAMES_TXT" "$_EXPORT_STDERR" "$_FFPROBE_STDERR" \
+    "$_PIPE_STATUS_FILE" "$_CAPTURE_STDERR"
 
   local sample_count=0
   [[ -f "$output_file" ]] && sample_count=$(wc -l < "$output_file")
@@ -244,22 +324,39 @@ analyze_latency() {
   
   log_info "Analyzing latency data from: $input_file"
   
-  local sample_count=$(wc -l < "$input_file")
-
   # Percentiles con Python (evita bugs de indexación awk).
   local _stats
   _stats=$(python3 - "$input_file" <<'PYEOF'
 import sys
-vals = sorted(int(x) for x in open(sys.argv[1]) if x.strip().isdigit())
+vals = []
+invalid = 0
+for line in open(sys.argv[1]):
+    text = line.strip()
+    if not text.isdigit():
+        invalid += bool(text)
+        continue
+    value = int(text)
+    if 0 <= value < 60000:
+        vals.append(value)
+    else:
+        invalid += 1
+vals.sort()
 def pct(p):
     if not vals: return 0
     return vals[min(len(vals)-1, int(len(vals)*p))]
-print(f"{pct(0.5)} {pct(0.95)} {pct(0.99)}")
+print(f"{len(vals)} {pct(0.5)} {pct(0.95)} {pct(0.99)} {int(invalid)}")
 PYEOF
 )
-  local p50 p95 p99
-  read -r p50 p95 p99 <<< "$_stats"
+  local sample_count p50 p95 p99 invalid_count
+  read -r sample_count p50 p95 p99 invalid_count <<< "$_stats"
+  sample_count=${sample_count:-0}
+  invalid_count=${invalid_count:-0}
   p50=${p50:-0}; p95=${p95:-0}; p99=${p99:-0}
+
+  if [[ "$invalid_count" -gt 0 ]]; then
+    log_error "Invalid latency samples: $invalid_count"
+    return 2
+  fi
   
   # Output results
   echo ""
@@ -330,7 +427,9 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --duration)
-        DURATION="$2"
+        validate_duration "${2:-}" || return $?
+        DURATION="$(normalize_duration "$2")"
+        DURATION_CLI_SET=1
         shift 2
         ;;
       --analyze)
@@ -365,6 +464,34 @@ EOF
         ;;
     esac
   done
+
+  if [[ "$mode" == "analyze" ]]; then
+    if [[ "$DURATION_CLI_SET" == "0" ]]; then
+      if ! validate_duration "$DURATION" 2>/dev/null; then
+        DURATION=300
+      else
+        DURATION="$(normalize_duration "$DURATION")"
+      fi
+    fi
+    configure_min_samples || return $?
+  else
+    validate_duration "$DURATION" || return $?
+    DURATION="$(normalize_duration "$DURATION")"
+    configure_min_samples || return $?
+  fi
+
+  if [[ "$mode" == "run" ]]; then
+    local run_dir
+    run_dir=$(mktemp -d "${TMPDIR:-/tmp}/qos-measure.XXXXXX")
+    chmod 700 "$run_dir"
+    LATENCY_OUTPUT_FILE="$run_dir/latency-results.csv"
+    LATENCY_RAW_FILE="$run_dir/latency-raw.jsonl"
+    ENCODER_LOG="$run_dir/encoder-log.txt"
+    TEST_VIDEO="$run_dir/test-5min.mp4"
+    touch "$LATENCY_OUTPUT_FILE" "$LATENCY_RAW_FILE" "$ENCODER_LOG"
+    chmod 600 "$LATENCY_OUTPUT_FILE" "$LATENCY_RAW_FILE" "$ENCODER_LOG"
+    trap 'rm -rf "$run_dir"' EXIT
+  fi
   
   log_info "Teremoqwow Latency Measurement — Fase 0"
   echo ""
@@ -374,7 +501,7 @@ EOF
     analyze_latency "$LATENCY_OUTPUT_FILE"
     return $?
   fi
-  
+
   # Full run mode: preflight → generate video → capture → analyze
   
   if ! preflight_checks; then
