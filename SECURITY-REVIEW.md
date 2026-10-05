@@ -17,10 +17,8 @@ constituyen una validación del despliegue productivo con Docker.
 | --- | --- | --- | --- |
 | Exposición de valores sensibles quoted con newline literal en el sanitizador | **MEDIUM residual** | `qos/scripts/qos-diagnostics.sh`, `qos_report_tool_diagnostic` | Residual |
 | Gap de aserción de un marcador `[REDACTED]` | **LOW** | `qos/scripts/test_data_plane_readiness.py`, tests del sanitizador | Residual de cobertura; no es por sí solo una nueva ruta de exposición |
-| Escritura de reports mediante hardlink | **HIGH** | writers de reports QoS, principalmente `qos/scripts/verify-lipsync.sh` y `qos/scripts/verify-pts-sync.sh` | No corregido |
-| Symlink en el directorio padre del report | **HIGH** | mismos writers de reports; creación/uso de la ruta de salida | No corregido |
-| TOCTOU en los writers principales | **HIGH** | `qos/scripts/verify-lipsync.sh` y `qos/scripts/verify-pts-sync.sh` | No corregido |
-| Overlay writer omite los guards de escritura | **HIGH** | writer de overlay en `qos/scripts/verify-pts-sync.sh` | No corregido |
+| TOCTOU entre path-check y `open` en writers principales | **MEDIUM** | `qos/scripts/verify-lipsync.sh` y `qos/scripts/verify-pts-sync.sh` | Residual; no corregido |
+| Overlay writer omite parent/nlink guards | **MEDIUM** | writer de overlay en `qos/scripts/verify-pts-sync.sh` | Residual; no corregido |
 | Race de artefactos en `/tmp` | **MEDIUM** | artefactos temporales de los scripts de QoS | Corregido mediante directorio privado |
 | Inyección JSON en el report PTS | **HIGH** | writer de `qos/scripts/verify-pts-sync.sh` | Corregido |
 | Overflow y weak floor de `MIN_SAMPLES` | **HIGH** | `qos/scripts/measure-e2e.sh` | Corregido |
@@ -45,42 +43,51 @@ el reporte. Esto contradice el objetivo del sanitizador y puede revelar
 credenciales en logs de CI/diagnóstico. Es el residual actual, aunque los casos
 de mixed-quotes ya estén corregidos.
 
-### 2. Escritura insegura de reports: hardlink, padre symlink y TOCTOU — HIGH
+### 2. Escritura de reports: TOCTOU residual — MEDIUM
 
-Las rondas `security r15/r14` confirmaron que los writers principales de reports
-no ofrecen una creación/actualización resistente a hardlinks, a un directorio
-padre sustituido por symlink y a la carrera TOCTOU entre comprobar la ruta y
-abrir/escribirla. Las ubicaciones principales son
-`qos/scripts/verify-lipsync.sh` y `qos/scripts/verify-pts-sync.sh`, incluyendo
-sus rutas `REPORT_FILE`/`PTS_REPORT_FILE` y el report de overlay.
+La ronda `security r15`, realizada después de los cambios del developer,
+confirmó una carrera TOCTOU entre comprobar la ruta y abrir/escribirla en los
+writers principales de reports. Las ubicaciones principales son
+`qos/scripts/verify-lipsync.sh` y `qos/scripts/verify-pts-sync.sh`, en sus rutas
+`REPORT_FILE`/`PTS_REPORT_FILE`.
 
-**Reproducción/impacto:** un atacante local que pueda manipular el directorio o
-la ruta de salida durante la ventana de escritura puede hacer que el script
-sobrescriba un archivo elegido mediante hardlink, redirija la escritura a
-través de un padre symlink, o gane la carrera entre validación y apertura.
-El impacto es sobrescritura/arbitraria modificación de archivos accesibles por
-la identidad que ejecuta el job, además de posible corrupción o exposición de
-reports.
+**Reproducción/impacto:** un atacante local que pueda manipular la ruta de
+salida durante la ventana entre la validación y la apertura puede sustituirla y
+redirigir la escritura. El impacto es sobrescritura/arbitraria modificación de
+archivos accesibles por la identidad que ejecuta el job, además de posible
+corrupción o exposición de reports.
 
-La corrección aplicada a la comprobación del **symlink final** no elimina estos
-findings: no cubre hardlinks, un padre symlink ni la sustitución TOCTOU después
-de la comprobación. Se mantienen explícitamente como **no corregidos**, no
-como una vulnerabilidad minimizada.
+Los guards actuales de los writers principales sí corrigen las comprobaciones de
+symlink final, hardlink/nlink y directorio padre real. No deben describirse como
+ausentes. La sustitución posterior a esos checks sigue siendo el residual
+TOCTOU **MEDIUM**. El usuario declinó los fixes de seguridad de `r15`; por ello
+este residual permanece explícitamente no corregido.
 
-### 3. Overlay writer sin guards — HIGH
+### 3. Overlay writer incompleto — MEDIUM
 
 `qos/scripts/verify-pts-sync.sh` tiene un writer de overlay que omite los
-guards de seguridad presentes (o previstos) para las rutas principales. La
-salida de overlay conserva por ello la superficie de hardlink/padre symlink/
-TOCTOU y puede eludir una validación aplicada a otro report.
+guards de parent real-dir y nlink/hardlink aplicados a las rutas principales.
+Conserva por ello una superficie de redirección mediante padre symlink o
+hardlink. Si se gana la ventana entre su path-check y `open`, también conserva
+la misma clase de TOCTOU; el reporte original no justificó elevar la severidad
+por encima de **MEDIUM**.
 
 **Impacto:** el atacante puede apuntar `OVERLAY_REPORT_FILE` a una ruta
-manipulada y obtener la misma sobrescritura arbitraria de archivos descrita
-arriba. Estado: **no corregido**.
+manipulada y obtener sobrescritura arbitraria de archivos accesibles por el job.
+Estado: **residual, no corregido**. El usuario declinó los fixes de seguridad
+`r15`, incluido este writer.
+
+### 4. Checks de hardlink y padre en reports principales — corregido
+
+Los cambios del developer aplicaron a los writers principales los checks de
+symlink final, `st_nlink`/hardlink y directorio padre real. El finding anterior
+de esas protecciones ausentes queda **corregido para los reports principales**;
+no se extiende al overlay writer incompleto ni elimina la carrera TOCTOU
+descrita arriba.
 
 ## Findings corregidos
 
-### 4. Race de artefactos en `/tmp` — MEDIUM, corregido
+### 5. Race de artefactos en `/tmp` — MEDIUM, corregido
 
 Los artefactos temporales de las pruebas podían competir o ser interferidos al
 usar nombres en `/tmp`. La cobertura actual crea y usa un directorio privado
@@ -89,7 +96,7 @@ por ejecución (incluido el fixture `isolated_ci_path` de
 y reduciendo la interferencia de otros usuarios del host. Estado: **corregido
 por directorio privado**.
 
-### 5. Inyección JSON en el report PTS — HIGH, corregido
+### 6. Inyección JSON en el report PTS — HIGH, corregido
 
 La entrada no confiable usada para construir el report PTS podía inyectar
 contenido JSON si se interpolaba sin serialización segura. El writer de
@@ -97,7 +104,7 @@ contenido JSON si se interpolaba sin serialización segura. El writer de
 serialización, y la cobertura de tests verifica que el contenido permanezca
 datos y no sintaxis adicional. Estado: **corregido**.
 
-### 6. `MIN_SAMPLES`: overflow y weak floor — HIGH, corregido
+### 7. `MIN_SAMPLES`: overflow y weak floor — HIGH, corregido
 
 `qos/scripts/measure-e2e.sh` aceptaba valores de `MIN_SAMPLES` que podían
 provocar overflow numérico y/o un mínimo demasiado débil para la duración
@@ -105,7 +112,7 @@ efectiva. La validación actual impone entero positivo acotado y el floor
 coherente con la duración; los casos de overflow y de mínimo insuficiente están
 cubiertos por `qos/scripts/test_data_plane_readiness.py`. Estado: **corregido**.
 
-### 7. Inyección de `duration` y sanitización — HIGH, corregido
+### 8. Inyección de `duration` y sanitización — HIGH, corregido
 
 El argumento `--duration` llegaba a operaciones de shell/temporización sin una
 validación suficientemente estricta. Un valor especialmente construido podía
@@ -113,7 +120,7 @@ alterar la ejecución del comando. `qos/scripts/measure-e2e.sh` valida ahora
 antes de ejecutar y limita el rango; los tests de sanitizer confirman que un
 payload inyectado no se ejecuta. Estado: **corregido**.
 
-### 8. Mixed-quotes en el sanitizador — MEDIUM, corregido parcialmente
+### 9. Mixed-quotes en el sanitizador — MEDIUM, corregido parcialmente
 
 La ronda adversarial confirmó que combinaciones de claves/valores con comillas
 simples y dobles podían evitar una regla que sólo contemplaba una forma de
