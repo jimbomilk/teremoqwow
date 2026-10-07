@@ -146,10 +146,16 @@ Arquitecto (contratos en schemas/)
     ▼
 developer (TDD RED→GREEN→REFACTOR, un task a la vez)
     ▼
-refuter-correctness + refuter-security + refuter-tests  (en paralelo, siempre los 3)
+refuter-correctness + refuter-tests  (en paralelo, siempre los 2)
     ▼
 Arquitecto (git/GitHub, vincula al proyecto #3)
 ```
+
+> **Seguridad al final (guideline del 2026-10-07).** El `refuter-security` **no** forma parte
+> del ciclo por task. Se ejecuta una sola vez, en la **auditoría de seguridad final**, cuando el
+> proyecto está terminado y antes de abrirlo a usuarios o datos reales. Mientras tanto, los
+> hallazgos de seguridad que aparezcan se **registran, no se corrigen**. Ver
+> [`02-DOCS/wiki/ftd/guideline-seguridad-al-final.md`](../02-DOCS/wiki/ftd/guideline-seguridad-al-final.md).
 
 **Reglas invariantes:**
 
@@ -160,6 +166,16 @@ Arquitecto (git/GitHub, vincula al proyecto #3)
 - El `developer` **nunca toca `schemas/`** — competencia exclusiva del Arquitecto.
 - El `developer` **nunca ejecuta `git commit`, `git push`, `gh pr/issue create`** —
   competencia exclusiva del Arquitecto.
-- Los **3 refuters** se invocan **en paralelo tras cada ciclo verde** del developer. No
-  son opcionales. Si cualquiera devuelve HIGH/CRITICAL, el developer corrige y vuelve
-  a invocarlos antes de entregar.
+- Los **2 refuters del ciclo** (`refuter-correctness` y `refuter-tests`) se invocan **en
+  paralelo tras cada ciclo verde** del developer. No son opcionales. Si cualquiera devuelve
+  HIGH/CRITICAL, el developer corrige y vuelve a invocarlos antes de entregar.
+- **Solo HIGH/CRITICAL bloquean.** Los MEDIUM/LOW no se corrigen en el task: el Arquitecto los
+  anota en el backlog y se sigue. Cada ronda de refuters revisa **solo el delta** de la ronda
+  anterior, no re-revisa lo ya aprobado. Si el HIGH es solo de cobertura de tests y trae
+  mutantes reproducibles, el Arquitecto verifica que los mutantes mueren y no hace falta otra
+  ronda de refuters.
+- **`refuter-security` queda fuera del ciclo por task.** Lo invoca el Arquitecto una vez, en la
+  auditoría de seguridad final. Los hallazgos de seguridad detectados antes (por cualquier agente)
+  se anotan en el backlog de seguridad diferida y **no bloquean** ni se corrigen en el task.
+- El `developer` sigue aplicando los invariantes de seguridad de `developer.agent.md` al escribir
+  código y nunca commitea secretos; lo que se aplaza es la **revisión adversarial**, no el cuidado.
