@@ -26,7 +26,9 @@ pass() { echo "[verify-federation] PASS — $*"; }
 cleanup() {
   log "Limpiando..."
   docker rm -f fed-relay-1 fed-relay-2 fed-publisher fed-subscriber 2>/dev/null || true
-  kill "$REGISTRY_PID" 2>/dev/null || true
+  if [[ -n "${REGISTRY_PID:-}" ]]; then
+    kill "$REGISTRY_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
