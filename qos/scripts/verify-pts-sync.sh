@@ -17,6 +17,12 @@ WINDOW_SEC="${WINDOW_SEC:-10}"
 RELAY_HOST="${RELAY_HOST:-moq-relay}"
 TEST_MODE="${TEST_MODE:-integration}"
 
+# Validar WINDOW_SEC antes de cualquier aritmética (evita x[$(cmd)] en $(( )))
+qos_require_window_sec || exit $?
+# Umbrales numéricos validados antes de usarlos en bc / aritmética / reporte
+qos_require_decimal THRESHOLD_MS || exit $?
+qos_require_decimal OVERLAY_THRESHOLD_MS || exit $?
+
 REPORT_FILE="${PTS_REPORT_FILE:-/tmp/pts-sync-report.json}"
 OVERLAY_REPORT_FILE="${OVERLAY_REPORT_FILE:-/tmp/overlay-sync-report.json}"
 TEMP_DIR=$(mktemp -d)
@@ -261,15 +267,18 @@ docker run --rm \
     --connect "tcp://${RELAY_HOST}:4444/anon" \
     --broadcast "${BROADCAST}" \
     export ts 2>"$TEMP_DIR/exporter.stderr" | \
-timeout $((WINDOW_SEC + 5)) ffprobe \
+timeout $((WINDOW_SEC + QOS_FFPROBE_TIMEOUT_MARGIN_SEC)) ffprobe \
     -v quiet \
     -read_intervals "%+${WINDOW_SEC}" \
     -show_frames -print_format json \
     pipe:0 2>"$TEMP_DIR/ffprobe.stderr" > "$_TMPJSON_PTS"
 _PIPE_STATUS=("${PIPESTATUS[@]}")
 set -e
-_EXPORT_STATUS="${_PIPE_STATUS[0]}"
 _FFPROBE_STATUS="${_PIPE_STATUS[1]}"
+# El exit 1 del exporter por "broken pipe" (ffprobe cerró el pipe) se tolera solo
+# si ffprobe salió 0; el análisis posterior sigue exigiendo frames de vídeo.
+_EXPORT_STATUS=$(qos_effective_exporter_status \
+  "${_PIPE_STATUS[0]}" "$_FFPROBE_STATUS" "$TEMP_DIR/exporter.stderr")
 qos_report_tool_diagnostic exporter "$_EXPORT_STATUS" "$TEMP_DIR/exporter.stderr"
 qos_report_tool_diagnostic ffprobe "$_FFPROBE_STATUS" "$TEMP_DIR/ffprobe.stderr"
 if [[ "$_EXPORT_STATUS" -ne 0 || "$_FFPROBE_STATUS" -ne 0 ]]; then

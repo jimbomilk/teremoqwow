@@ -34,6 +34,14 @@ PLAYER_HOST="${PLAYER_HOST:-laptop-077c92vt.tailbd33d7.ts.net}"
 PLAYER_PORT="${PLAYER_PORT:-5443}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/qos-diagnostics.sh"
+
+# Validar WINDOW_SEC antes de cualquier aritmética (evita x[$(cmd)] en $(( )))
+qos_require_window_sec || exit $?
+
+# El gate debe sobrevivir al timeout interno de ffprobe (WINDOW_SEC + margen)
+# para que su exit=124 llegue al diagnóstico y se clasifique TOOL_ERROR.
+READINESS_DEADLINE_SEC=$((WINDOW_SEC + QOS_FFPROBE_TIMEOUT_MARGIN_SEC + QOS_GATE_TIMEOUT_SLACK_SEC))
 PASS_COUNT=0
 FAIL_COUNT=0
 TOTAL_CHECKS=4
@@ -207,18 +215,18 @@ fi
 # 3. Verificar track de sincronía (issue #65)
 ##############################################################################
 
-log "--- MEDIA READINESS: audio/video frames (deadline 30s) ---"
+log "--- MEDIA READINESS: audio/video frames (deadline ${READINESS_DEADLINE_SEC}s) ---"
   _readiness_output=$(mktemp)
   set +e
   BROADCAST="$BROADCAST" WINDOW_SEC="$WINDOW_SEC" RELAY_HOST="$RELAY_HOST" \
     LIPSYNC_READINESS_ONLY=1 \
-    timeout 30 bash "${SCRIPT_DIR}/verify-lipsync.sh" \
+    timeout "$READINESS_DEADLINE_SEC" bash "${SCRIPT_DIR}/verify-lipsync.sh" \
     >"$_readiness_output" 2>&1
   _readiness_rc=$?
   set -e
   cat "$_readiness_output"
   if [[ "$_readiness_rc" -ne 0 ]]; then
-    if grep -Eq '\[QOS-DIAGNOSTIC\] stage=.*exit=[1-9][0-9]*' "$_readiness_output"; then
+    if grep -Eq '^\[QOS-DIAGNOSTIC\] stage=[^ ]+ exit=[1-9][0-9]*( |$)' "$_readiness_output"; then
       fail "Media readiness TOOL_ERROR"
     else
       fail "Media readiness DATA_PATH_FAILURE"
@@ -292,6 +300,24 @@ esac
 # CHECK 5. Latencia glass-to-glass desde player remoto (/metrics/latency)
 ##############################################################################
 
+# Imprime el campo $2 del objeto JSON $1 si es número o cadena (nada si falta,
+# es null/bool/lista/objeto). rc 3 si $1 no es un objeto JSON.
+_metrics_field() {
+  printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+if not isinstance(d, dict):
+    sys.exit(3)
+v = d.get(sys.argv[1])
+if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+    sys.exit(0)
+print(v)
+' "$2"
+}
+
 if [[ "$SKIP_REMOTE_LATENCY" == "0" ]]; then
   log "--- CHECK 5/${TOTAL_CHECKS}: Latencia glass-to-glass (player remoto) ---"
   set +e
@@ -302,13 +328,22 @@ if [[ "$SKIP_REMOTE_LATENCY" == "0" ]]; then
     PASS_COUNT=$((PASS_COUNT + 1))
     RESULTS+=("WARN: Latencia remota (player no disponible — no FAIL)")
   else
-    SAMPLES=$(echo "${METRICS_JSON}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('samples',0))" 2>/dev/null || echo "0")
-    P95=$(echo "${METRICS_JSON}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('p95_ms',0))" 2>/dev/null || echo "0")
-    if [[ "${SAMPLES}" == "0" ]]; then
+    # Un cuerpo que no es un objeto JSON (HTML 404/502, null, ...) o sin P95
+    # válido NO es una medida: INCONCLUSIVE (cuenta como FAIL, nunca como PASS).
+    METRICS_JSON_OK=1
+    SAMPLES=$(_metrics_field "${METRICS_JSON}" samples) || METRICS_JSON_OK=0
+    P95=$(_metrics_field "${METRICS_JSON}" p95_ms) || METRICS_JSON_OK=0
+    if [[ "${METRICS_JSON_OK}" != "1" ]]; then
+      fail "Latencia remota INCONCLUSIVE: respuesta no es un objeto JSON, descartada sin evaluar"
+    elif ! qos_is_decimal "${SAMPLES}"; then
+      fail "Latencia remota samples ausente o no numérico (INCONCLUSIVE): descartado sin evaluar"
+    elif [[ "${SAMPLES}" =~ ^0+(\.0+)?$ ]]; then
       log "⚠ WARN: samples=0 — player conectando, sin muestras"
       PASS_COUNT=$((PASS_COUNT + 1))
       RESULTS+=("WARN: Latencia remota samples=0 (player conectando)")
-    elif (( P95 >= 700 )); then
+    elif ! qos_is_decimal "${P95}"; then
+      fail "Latencia remota P95 ausente o no numérico (INCONCLUSIVE): descartado sin evaluar"
+    elif python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 700 else 1)' "${P95}"; then
       fail "Latencia remota P95=${P95}ms ≥ 700ms"
     else
       pass "Latencia remota P95=${P95}ms < 700ms (${SAMPLES} muestras)"

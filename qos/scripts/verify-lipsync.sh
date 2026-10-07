@@ -20,8 +20,14 @@ REPORT_FILE="${LIPSYNC_REPORT_FILE:-/tmp/lipsync-report.json}"
 EXPORT_CONTAINER="lipsync-export"
 EXPORT_PORT="9001"
 
-# Timestamp actual en ms (unix epoch)
-MEASURED_AT_MS=$(($(date +%s) * 1000 + $(date +%N) / 1000000))
+# Validar WINDOW_SEC antes de cualquier aritmética (evita x[$(cmd)] en $(( )))
+qos_require_window_sec || exit $?
+# THRESHOLD_MS entra en una comparación aritmética: validar antes de usarlo.
+qos_require_decimal THRESHOLD_MS || exit $?
+
+# Timestamp actual en ms (unix epoch). %N con ceros a la izquierda (p. ej. 089...)
+# sería octal inválido en aritmética: forzar base 10.
+MEASURED_AT_MS=$(($(date +%s) * 1000 + 10#$(date +%N) / 1000000))
 
 ##############################################################################
 # Funciones
@@ -167,7 +173,7 @@ docker run --rm \
     --connect "tcp://${RELAY_HOST}:4444/anon" \
     --broadcast "${BROADCAST}" \
     export ts 2>"$_EXPORT_STDERR" | \
-timeout $((WINDOW_SEC + 5)) ffprobe \
+timeout $((WINDOW_SEC + QOS_FFPROBE_TIMEOUT_MARGIN_SEC)) ffprobe \
     -v quiet \
     -read_intervals "%+${WINDOW_SEC}" \
     -show_frames \
@@ -176,9 +182,13 @@ timeout $((WINDOW_SEC + 5)) ffprobe \
 _PIPE_STATUS=("${PIPESTATUS[@]}")
 set -e
 
-qos_report_tool_diagnostic exporter "${_PIPE_STATUS[0]}" "$_EXPORT_STDERR"
+# ffprobe cierra el pipe tras su -read_intervals: el exit 1 del exporter por
+# "broken pipe" se tolera solo si ffprobe salió 0 (los frames se exigen abajo).
+_EXPORT_EFFECTIVE=$(qos_effective_exporter_status \
+  "${_PIPE_STATUS[0]}" "${_PIPE_STATUS[1]}" "$_EXPORT_STDERR")
+qos_report_tool_diagnostic exporter "$_EXPORT_EFFECTIVE" "$_EXPORT_STDERR"
 qos_report_tool_diagnostic ffprobe "${_PIPE_STATUS[1]}" "$_FFPROBE_STDERR"
-if [[ "${_PIPE_STATUS[0]}" -ne 0 || "${_PIPE_STATUS[1]}" -ne 0 ]]; then
+if [[ "$_EXPORT_EFFECTIVE" -ne 0 || "${_PIPE_STATUS[1]}" -ne 0 ]]; then
   generate_report "0" "0" "false"
   warn "export/decoder tool failed; measurement unavailable"
   exit 1
