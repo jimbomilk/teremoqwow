@@ -15,10 +15,12 @@ CMD ["npm", "run", "dev"]
 FROM node:20-alpine AS build
 
 # Build-time vars que Vite sustituye en el bundle
-ARG VITE_MOQ_RELAY_URL=wss://localhost:4443/anon
+ARG VITE_MOQ_RELAY_URL=https://wow.teremoq.com:4443/anon
 ARG VITE_RELAY_BROADCAST=anon/live1
+ARG VITE_MOQ_CERT_HASH=
 ENV VITE_MOQ_RELAY_URL=$VITE_MOQ_RELAY_URL
 ENV VITE_RELAY_BROADCAST=$VITE_RELAY_BROADCAST
+ENV VITE_MOQ_CERT_HASH=$VITE_MOQ_CERT_HASH
 
 WORKDIR /app
 COPY package.json ./

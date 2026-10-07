@@ -94,6 +94,15 @@ Output en `dist/`.
 npm run preview
 ```
 
+### Producción detrás de `/player/`
+
+Vite genera referencias relativas (`./assets/...`) para que los assets funcionen tanto
+con el servidor de desarrollo en `/` como con el build publicado bajo `/player/`.
+El build de producción usa `https://wow.teremoq.com:4443/anon` con el broadcast
+`anon/live1`, conectándose por WebTransport. El certificado público de Let's Encrypt
+no requiere un `cert-hash`; el valor se deja vacío en el build. Para relays de desarrollo
+con certificados autofirmados, configura el hash como se indica a continuación.
+
 ## Dependencias principales
 
 | Paquete | Versión | Rol |
