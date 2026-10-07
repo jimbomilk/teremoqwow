@@ -45,6 +45,11 @@ jobs:
           timeout 30 bash -c 'until docker logs moq-relay 2>&1 | grep -q "listening"; do sleep 1; done'
           echo "moq-relay ready"
 
+      - name: Install ffmpeg (ffprobe for QoS checks)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+          ffprobe -version | head -1
+
       - name: Run QoS integration test (4/4)
         run: |
           SKIP_NETEM=1 WINDOW_SEC=15 timeout 180 bash qos/scripts/integration-test.sh

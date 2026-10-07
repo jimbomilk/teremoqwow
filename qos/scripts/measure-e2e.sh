@@ -40,14 +40,7 @@ PLAYER_METRICS_URL="http://${PLAYER_HOST}:${PLAYER_PORT}/metrics/latency"
 
 P95_THRESHOLD_MS=700
 
-validate_duration() {
-  local candidate="${1:-}"
-  if [[ ! "$candidate" =~ ^[0-9]{1,4}$ ]] ||
-     (( 10#$candidate < 1 || 10#$candidate > 3600 )); then
-    printf '[ERROR] Invalid duration: expected a decimal integer from 1 to 3600 seconds\n' >&2
-    return 2
-  fi
-}
+# validate_duration vive en qos-diagnostics.sh (compartido con WINDOW_SEC).
 
 normalize_duration() {
   local normalized="$1"
@@ -228,14 +221,15 @@ except Exception:
 
   # Timestamp cada frame en Unix ms al llegar a ffprobe. Formato: "TS_MS|<compact ffprobe line>"
   local _CAPTURE_RC=0
-  timeout $((duration + 15)) bash -c '
+  # El timeout externo debe sobrevivir al de ffprobe (duration + margen) para no enmascararlo.
+  timeout $((duration + QOS_FFPROBE_TIMEOUT_MARGIN_SEC + QOS_GATE_TIMEOUT_SLACK_SEC)) bash -c '
     docker run --rm --name "$5" \
       --network "$6" \
       moqdev/moq:0.12.7 \
       --connect "tcp://$7:4444/anon" \
       --broadcast "$8" \
       export ts 2>"$1" | \
-    timeout "$(($2 + 5))" ffprobe \
+    timeout "$(($2 + $9))" ffprobe \
       -v quiet -show_frames -print_format compact \
       -read_intervals "%+$2" \
       pipe:0 2>"$3" | \
@@ -247,6 +241,7 @@ except Exception:
     printf "%s\n" "${pipeline_status[@]}" > "$4"
   ' _ "$_EXPORT_STDERR" "$duration" "$_FFPROBE_STDERR" \
     "$_PIPE_STATUS_FILE" "$EXPORT_NAME" "$relay_net" "$relay_host" "$broadcast" \
+    "$QOS_FFPROBE_TIMEOUT_MARGIN_SEC" \
     > "$_FRAMES_TXT" 2>"$_CAPTURE_STDERR" || _CAPTURE_RC=$?
 
   local _EXPORT_RC=1
@@ -257,6 +252,9 @@ except Exception:
     _EXPORT_RC="${_PIPE_STATUS[0]:-1}"
     _FFPROBE_RC="${_PIPE_STATUS[1]:-1}"
   fi
+  # El exit 1 del exporter por "broken pipe" (ffprobe cerró el pipe) se tolera solo
+  # si ffprobe salió 0; las muestras mínimas se siguen exigiendo en el análisis.
+  _EXPORT_RC=$(qos_effective_exporter_status "$_EXPORT_RC" "$_FFPROBE_RC" "$_EXPORT_STDERR")
   qos_report_tool_diagnostic exporter "$_EXPORT_RC" "$_EXPORT_STDERR"
   qos_report_tool_diagnostic ffprobe "$_FFPROBE_RC" "$_FFPROBE_STDERR"
   if [[ "$_CAPTURE_RC" -ne 0 ]]; then
@@ -481,8 +479,12 @@ EOF
   fi
 
   if [[ "$mode" == "run" ]]; then
-    local run_dir
-    run_dir=$(mktemp -d "${TMPDIR:-/tmp}/qos-measure.XXXXXX")
+    # Global a propósito: el trap EXIT corre tras retornar main() y una `local`
+    # ya no existiría (unbound variable con `set -u`, y el directorio quedaría).
+    run_dir=$(mktemp -d "${TMPDIR:-/tmp}/qos-measure.XXXXXX") || {
+      log_error "no se pudo crear el directorio temporal en ${TMPDIR:-/tmp}"
+      return 1
+    }
     chmod 700 "$run_dir"
     LATENCY_OUTPUT_FILE="$run_dir/latency-results.csv"
     LATENCY_RAW_FILE="$run_dir/latency-raw.jsonl"
@@ -490,7 +492,7 @@ EOF
     TEST_VIDEO="$run_dir/test-5min.mp4"
     touch "$LATENCY_OUTPUT_FILE" "$LATENCY_RAW_FILE" "$ENCODER_LOG"
     chmod 600 "$LATENCY_OUTPUT_FILE" "$LATENCY_RAW_FILE" "$ENCODER_LOG"
-    trap 'rm -rf "$run_dir"' EXIT
+    trap 'rm -rf "${run_dir:-}"' EXIT
   fi
   
   log_info "Teremoqwow Latency Measurement — Fase 0"
