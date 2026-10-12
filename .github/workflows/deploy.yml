@@ -114,7 +114,7 @@ jobs:
             if [ "$FORCE_FULL" = "true" ] || [ "$FORCE_FULL" = "1" ] || [ "$FORCE_FULL" = "yes" ]; then
               echo "=== Forzando deploy completo ==="
               BUILD_SERVICES="auth billing-webhook portal registry-server admin-api admin player"
-              RESTART_SERVICES="redis clickhouse moq-relay krakend nginx prometheus grafana"
+              RESTART_SERVICES="redis clickhouse moq-relay srt-ingest krakend nginx prometheus grafana"
             else
               [ "${CHANGED_AUTH:-false}"     = "true" ] && BUILD_SERVICES="$BUILD_SERVICES auth"
               [ "${CHANGED_BILLING:-false}"  = "true" ] && BUILD_SERVICES="$BUILD_SERVICES billing-webhook"
@@ -122,7 +122,7 @@ jobs:
               [ "${CHANGED_REGISTRY:-false}" = "true" ] && BUILD_SERVICES="$BUILD_SERVICES registry-server"
               [ "${CHANGED_ADMIN:-false}"    = "true" ] && BUILD_SERVICES="$BUILD_SERVICES admin-api admin"
               [ "${CHANGED_PLAYER:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES player"
-              [ "${CHANGED_INFRA:-false}"    = "true" ] && RESTART_SERVICES="$RESTART_SERVICES nginx"
+              [ "${CHANGED_INFRA:-false}"    = "true" ] && RESTART_SERVICES="$RESTART_SERVICES nginx srt-ingest"
               [ "${CHANGED_CONFIG:-false}"   = "true" ] && RESTART_SERVICES="$RESTART_SERVICES krakend prometheus grafana"
             fi
 

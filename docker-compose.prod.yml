@@ -47,6 +47,35 @@ services:
       driver: "json-file"
       options: { max-size: "50m", max-file: "3" }
 
+  # ── SRT Ingest (Larix Broadcaster → relay) ────────────────────────────────
+  # `moq import srt --listen` acepta SRT caller (MPEG-TS H.264+AAC) y publica
+  # en anon/live1 vía TCP interno del relay. Ver docs/runbooks/srt-larix-ingest.md.
+  # Sin healthcheck: el listener es UDP y la imagen no tiene sonda UDP (ni nc).
+  # SIN autenticación: el CLI no soporta passphrase y el streamid no se valida.
+  srt-ingest:
+    image: moqdev/moq:0.12.7
+    networks: [teremoqwow-prod]
+    ports:
+      - "8890:8890/udp"
+    command:
+      - --connect
+      - tcp://moq-relay:4444/anon
+      - --broadcast
+      - anon/live1
+      - import
+      - srt
+      - --listen
+      - "[::]:8890"
+      - --latency
+      - 500ms
+    depends_on:
+      moq-relay:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "2" }
+
   # ── KrakenD API Gateway ────────────────────────────────────────────────────
   krakend:
     image: devopsfaith/krakend:2.6

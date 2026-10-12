@@ -25,6 +25,7 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 4443/tcp    # MoQ WebTransport (TCP)
 ufw allow 4443/udp    # MoQ WebTransport (QUIC)
+ufw allow 8890/udp    # SRT ingest (Larix)
 ufw --force enable
 
 # ── Usuario de deploy ─────────────────────────────────────────────────────────
