@@ -103,8 +103,8 @@ El servicio corre (simplificado, sin drawtext):
 
 ```bash
 ffmpeg \
-  -f lavfi -i "testsrc2=s=1280x720:r=30:d=0" \
-  -f lavfi -i "sine=f=1000:r=48000:d=0" \
+  -re -f lavfi -i "testsrc2=s=1280x720:r=30" \
+  -re -f lavfi -i "sine=f=1000:r=48000" \
   -map "0" -map "1" \
   -c:v libx264 -profile:v baseline -bf 0 -g 30 -keyint_min 30 -sc_threshold 0 \
     -preset veryfast -tune zerolatency -pix_fmt yuv420p -r 30 \
@@ -116,15 +116,18 @@ ffmpeg \
 
 | Parámetro | Valor | Razón |
 |-----------|-------|-------|
-| **Vídeo fuente** | testsrc2 | Determinista; patrón de test visible en player |
+| **Pacing** | -re (antes de cada lavfi) | Evita correr a 51x speed (~1 MB/s). Incidente FIX: #XXX |
+| **Vídeo fuente** | testsrc2 (sin d=) | Determinista; patrón de test visible en player. Duración infinita (default). |
 | **Resolución** | 1280x720 @ 30 fps | Broadcast estándar |
 | **Keyframe interval** | -g 30 (1s @ 30fps) | SLA latencia P95 <700ms (issue #133) |
 | **Codec vídeo** | H.264 baseline | Baja latencia (sin B-frames) |
 | **Pix format** | yuv420p | Compatible con SRT/MPEG-TS |
-| **Audio fuente** | sine 1000 Hz @ 48 kHz | Determinista; tono audible en player |
+| **Audio fuente** | sine 1000 Hz @ 48 kHz (sin d=) | Determinista; tono audible. Duración infinita (default). |
 | **Codec audio** | AAC @ 128k | Estándar MPEG-TS |
 | **Container** | MPEG-TS | Requerido por SRT listener |
 | **SRT target** | srt://srt-ingest:8890 | Red interna; streamid=live1; latency=500ms |
+
+**Nota histórica (INCIDENTE FIX):** En jrottenberg/ffmpeg:7.1-alpine, `testsrc2=d=0` genera duración cero → ffmpeg emitía 0 frames de vídeo (solo audio) a 51x speed (~1 MB/s), sin pacing. Solución: remover `d=0` de ambas entradas (lavfi no especifica duración → infinita) y añadir `-re` antes de cada lavfi para pacing en tiempo real.
 
 ---
 
