@@ -76,4 +76,9 @@ jobs:
             docker stats --no-stream --format '{{.Name}} net={{.NetIO}}' teremoqwow-srt-ingest-1 teremoqwow-source-ffmpeg-1 || true
             
             echo ""
+            echo ""
+            echo "=== PIPELINE SNAPSHOT (admin-api, solo lectura de Redis) ==="
+            $COMPOSE exec -T admin-api python -c "import json,os,redis,pipeline_api as p;from datetime import datetime,timezone;r=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True);print(json.dumps(p.get_snapshot(r,datetime.now(timezone.utc)),indent=1))" 2>&1 | cut -c1-300 || true
+
+            echo ""
             echo "=== DIAGNOSTICS COMPLETE ==="
