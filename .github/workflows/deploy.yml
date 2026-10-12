@@ -79,7 +79,7 @@ jobs:
           echo "force_full=${{ github.event.inputs.force_full }}"
 
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_HOST }}
           username: deploy
