@@ -71,16 +71,37 @@ en admin: 1) ingesta vídeo/audio/data, 2) flujo MoQ + relay, 3) player.
   `OK source-ffmpeg`, `OK srt-ingest`; `compose ps`: source-ffmpeg "Up Less than a second"
   (imagen jrottenberg/ffmpeg:7.1-alpine), srt-ingest "Up 45 seconds" con
   `0.0.0.0:8890->8890/udp`. https://wow.teremoq.com/player/ y /api/health → 200.
-- **Gates de flujo NO comprobadas (PENDIENTES)**: sin acceso al servidor (SSH directo:
-  "Host key verification failed", no se desactivó) y sin endpoint público del relay
-  (`:4443/announced/` sin respuesta). Por tanto NO hay evidencia de: RestartCount estable,
-  sonda state=running, bytes SRT crecientes en dos muestras, broadcast `anon/live1`
-  anunciado. El único dato es que el contenedor arrancó (1 s tras el up), insuficiente
-  para descartar crash-loop. Comandos para el operador (en el servidor, como deploy):
-  `docker inspect -f '{{.RestartCount}} {{.State.Status}}' teremoqwow-source-ffmpeg-1`
-  (dos veces, 30 s entre ellas); `bash /opt/teremoqwow/scripts/probe-source-ffmpeg.sh`;
-  `docker logs --since 30s teremoqwow-srt-ingest-1` dos veces separadas 15 s (bytes/sesión
-  creciendo); `docker logs --tail 50 teremoqwow-moq-relay-1 | grep -i live1`.
+- **INCIDENTE 2026-10-12 y causa raíz.** Tras el primer deploy, el player anunciaba
+  `anon/live1` pero no llegaba media (0 frames; `export ts` con cliente moq = 0 bytes).
+  Visibilidad: nuevo workflow `prod-diagnostics.yml` (workflow_dispatch, solo lectura, secrets
+  de deploy; #211) → run 38234037695. Observado en producción: contenedores `source-ffmpeg`,
+  `srt-ingest` y `moq-relay` running, restarts=0; srt-ingest "SRT publish accepted" y
+  "publishing ingest broadcast path=anon/live1"; el relay recibía ~1 MB/s PERO el log de
+  ffmpeg mostraba `frame=0 ... time=11:40:24 speed=51.3x` y srt-ingest registraba
+  `subscribed error ... track=catalog.json err=internal error`.
+  **Causa raíz**: `testsrc2=...:d=0` tiene duración CERO (medido con la imagen exacta:
+  `frame=0`; sin `d` → `frame=60` en 2 s), mientras `sine ...:d=0` sí es infinito. Solo salía
+  audio, sin vídeo (sin catálogo) y, sin `-re`, a 51x tiempo real. NO era la carrera de
+  arranque (SRT aceptado a los 0,1 s), ni la imagen ni el puerto.
+  **Fix** (#212, tests de configuración, mutantes verificados muertos): sin `d=` en las
+  entradas lavfi y `-re` exactamente una vez por entrada lavfi. refuter-correctness: LOW×2;
+  refuter-tests: 2 HIGH de cobertura (alias `duration=`, `-re` atribuido a la entrada
+  equivocada) corregidos y verificados con mutantes.
+- **Evidencia bytes > 0 en producción** (cliente oficial `moqdev/moq:0.12.7 --connect
+  https://wow.teremoq.com:4443/anon --broadcast anon/live1 export ts`, ventanas de 20 s):
+  10:30:51 UTC 54 896 B; 10:31:22 UTC 7 196 264 B; 10:45:30 UTC 12 705 980 B; 10:46:07 UTC
+  12 337 876 B (y una lectura larga previa de 154 684 520 B). Catálogo ahora con
+  `0.avc3`, `1.aac` (suscripciones a ambas pistas). `prod-diagnostics` 10:24 UTC: source-ffmpeg
+  restarts=0, TX 30 MB → 42,7 MB en 15 s (avanza). Solo flujo de datos; nada afirmado sobre
+  calidad de imagen o sonido.
+- Observación sin resolver (LOW): las lecturas de 20 s son muy variables (54 KB a 12 MB) y el
+  cliente registra `current group evicted ... track=1.aac`; es comportamiento del consumidor
+  de prueba, no concluyente. Pendiente de revisar con Fase 1.
+- `/metrics/latency` en bucle 404: endpoint solo de dev (plugin Vite, `apply: serve`);
+  corregido en #213 gateando el POST con `import.meta.env.DEV` (MEDIUM backlog: el cableado
+  de bootstrap.ts no tiene test; CI no ejecuta metrics.test.ts).
+- `/cert-hash` y `/certificate.sha256` siguen 404; `/api/cert-hash` da 200. Comentado en #167,
+  no corregido (no necesario con certificados Let's Encrypt).
 - CI de #204: el fallo "QoS integration" (PTS-sync / P95) es preexistente en `main`
   (mismos fallos en runs de main del 07-oct) y es de contenido, fuera de las gates de flujo.
 - `8890/udp` abierto: no verificable desde aquí (UDP); lo publica `srt-ingest` en la compose.
@@ -89,7 +110,13 @@ en admin: 1) ingesta vídeo/audio/data, 2) flujo MoQ + relay, 3) player.
 
 ## Next
 
-Aprobar y mergear #204 (merge commit, no squash), retargetear #209 a main y mergearlo;
-Actions despliega. Luego medir bytes en dos lecturas. Merge de #204 y esta entrega tras verificar en producción; después Fase 1 (data en
-`anon/live1-meta`, contadores de bytes), Fase 2, Fase 3 y admin con semáforos por fase
-(automático=flujo, humano=calidad con operador+fecha).
+- Fase 1 (#206): data en `anon/live1-meta`, contadores de bytes; Fases 2/3 (#207/#208).
+- Verificación humana audiovisual de #205 (único veredicto válido de vídeo/audio): pendiente
+  de instrucción al usuario en el issue.
+- Siguiente task aprobado, NO implementado: vista Admin "Pipeline" (issue #214) con 3 fases
+  (ingesta v/a/data, MoQ+relay, player). Por fase: transporte automático
+  OK/DEGRADED/DOWN/BLOCKED/UNKNOWN y verificación humana VERIFIED/NOT_VERIFIED (operador +
+  fecha). Fases posteriores BLOCKED si falla una anterior; causa, última transición,
+  last-green, bytes/objetos, trazabilidad; alimentada por observaciones reales y
+  `prod-diagnostics`/API, sin datos simulados ni Docker lanzado desde admin-api.
+- Trabajo aparte posterior: ruleset "Protect main" y check "QoS integration".
