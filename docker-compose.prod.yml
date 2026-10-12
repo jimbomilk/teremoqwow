@@ -104,7 +104,7 @@ services:
       - "0"
       - -map
       - "1"
-      # Codificación vídeo: H.264 baseline, yuv420p, GOP ≤60 (1s @ 30fps para low-latency)
+      # Codificación vídeo: H.264 baseline, yuv420p, GOP 30 frames = 1s @ 30fps (SLA <700ms, issue #133)
       - -c:v
       - libx264
       - -profile:v
@@ -112,9 +112,9 @@ services:
       - -bf
       - "0"
       - -g
-      - "60"
+      - "30"
       - -keyint_min
-      - "60"
+      - "30"
       - -sc_threshold
       - "0"
       - -preset

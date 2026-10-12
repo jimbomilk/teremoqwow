@@ -291,6 +291,86 @@ class TestSourceFFmpegFFmpegCommand:
             f"command debe usar '-f lavfi' para fuentes generadas (found: {cmd_str})"
         )
 
+    def test_gop_size_is_30_frames(self, service):
+        """Verifica que GOP = 30 frames (1s @ 30fps) para cumplir SLA P95 <700ms.
+        
+        REF: issue #133 — MoQ subscriber entra en frontera de IDR, por lo que
+        GOP > 30 causa latencia > 700ms. Histórico: config/moq-mux/run.sh usa -g 30.
+        
+        MUTANTE MATA: -g 60, -g 40, -g 20, -g NN con NN ≠ 30.
+        MUTANTE NO MATA: -g 30 correctamente.
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        # Busca el parámetro -g en la lista de comandos
+        try:
+            g_index = cmd.index("-g")
+            g_value = cmd[g_index + 1]
+            assert g_value == "30", (
+                f"Parámetro -g debe ser 30 (1s @ 30fps, SLA latencia <700ms, issue #133). "
+                f"Encontrado: -g {g_value}. "
+                f"Nota: Histórico en config/moq-mux/run.sh usa -g 30 correctamente."
+            )
+        except (ValueError, IndexError):
+            pytest.fail(
+                f"Falta parámetro -g en command o -g sin valor. "
+                f"command: {cmd_str}. "
+                f"Referencia issue #133."
+            )
+
+    def test_keyint_min_is_30_frames(self, service):
+        """Verifica que -keyint_min = 30 para mantener alineación GOP.
+        
+        REF: issue #133 — -keyint_min ≠ -g permite keyframes adaptativas que rompen
+        la garantía de GOP. Debe ser idéntico a -g.
+        
+        MUTANTE MATA: -keyint_min 60, -keyint_min 20, -keyint_min NN con NN ≠ 30.
+        MUTANTE NO MATA: -keyint_min 30 correctamente.
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        try:
+            kmin_index = cmd.index("-keyint_min")
+            kmin_value = cmd[kmin_index + 1]
+            assert kmin_value == "30", (
+                f"Parámetro -keyint_min debe ser 30 (alineado con -g para GOP constante, issue #133). "
+                f"Encontrado: -keyint_min {kmin_value}."
+            )
+        except (ValueError, IndexError):
+            pytest.fail(
+                f"Falta parámetro -keyint_min en command o sin valor. "
+                f"command: {cmd_str}. "
+                f"Referencia issue #133."
+            )
+
+    def test_sc_threshold_is_zero(self, service):
+        """Verifica que -sc_threshold = 0 (no scene change detection).
+        
+        REF: issue #133 — -sc_threshold > 0 permite keyframes oportunistas que rompen
+        GOP constante. Debe ser 0 para garantizar keyframes solo a -g.
+        
+        MUTANTE MATA: -sc_threshold 10, -sc_threshold 27, -sc_threshold NN con NN > 0.
+        MUTANTE NO MATA: -sc_threshold 0 correctamente.
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        try:
+            sc_index = cmd.index("-sc_threshold")
+            sc_value = cmd[sc_index + 1]
+            assert sc_value == "0", (
+                f"Parámetro -sc_threshold debe ser 0 (desactiva scene change detection, issue #133). "
+                f"Encontrado: -sc_threshold {sc_value}."
+            )
+        except (ValueError, IndexError):
+            pytest.fail(
+                f"Falta parámetro -sc_threshold en command o sin valor. "
+                f"command: {cmd_str}. "
+                f"Referencia issue #133."
+            )
+
 
 class TestSourceFFmpegDeployIntegration:
     """Tests de integración en deploy.yml."""

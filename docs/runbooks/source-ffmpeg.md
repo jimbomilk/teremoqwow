@@ -106,7 +106,7 @@ ffmpeg \
   -f lavfi -i "testsrc2=s=1280x720:r=30:d=0" \
   -f lavfi -i "sine=f=1000:r=48000:d=0" \
   -map "0" -map "1" \
-  -c:v libx264 -profile:v baseline -bf 0 -g 60 -keyint_min 60 -sc_threshold 0 \
+  -c:v libx264 -profile:v baseline -bf 0 -g 30 -keyint_min 30 -sc_threshold 0 \
     -preset veryfast -tune zerolatency -pix_fmt yuv420p -r 30 \
   -c:a aac -ar 48000 -ac 2 -b:a 128k \
   -f mpegts "srt://srt-ingest:8890?mode=caller&streamid=live1&latency=500"
@@ -118,7 +118,7 @@ ffmpeg \
 |-----------|-------|-------|
 | **Vídeo fuente** | testsrc2 | Determinista; patrón de test visible en player |
 | **Resolución** | 1280x720 @ 30 fps | Broadcast estándar |
-| **Keyframe interval** | -g 60 (2s @ 30fps) | SLA latencia <700ms |
+| **Keyframe interval** | -g 30 (1s @ 30fps) | SLA latencia P95 <700ms (issue #133) |
 | **Codec vídeo** | H.264 baseline | Baja latencia (sin B-frames) |
 | **Pix format** | yuv420p | Compatible con SRT/MPEG-TS |
 | **Audio fuente** | sine 1000 Hz @ 48 kHz | Determinista; tono audible en player |
