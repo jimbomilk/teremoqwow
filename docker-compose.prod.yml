@@ -76,6 +76,76 @@ services:
       driver: "json-file"
       options: { max-size: "10m", max-file: "2" }
 
+  # ── Source FFmpeg (testsrc2 + audio deterministas) ───────────────────────────
+  # Publica vídeo+audio sintéticos por SRT a srt-ingest:8890 (streamid live1).
+  # Prerrequisito de ingesta (Fase 0). Ver docs/runbooks/source-ffmpeg.md.
+  # Sin puertos publicados: comunica internamente vía srt-ingest en red teremoqwow-prod.
+  # Si termina, docker lo reinicia automáticamente.
+  source-ffmpeg:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    networks: [teremoqwow-prod]
+    # Nota: Esperar a srt-ingest garantiza que el listener UDP está listo.
+    # Si srt-ingest falla conectar al relay, ffmpeg puede reintentar vía restart policy.
+    # Video: testsrc2 determinista (patrón de test)
+    # Audio: sine 1kHz determinista
+    command:
+      # Entrada: testsrc2 a 1280x720 30fps
+      - -f
+      - lavfi
+      - -i
+      - "testsrc2=s=1280x720:r=30:d=0"
+      # Entrada: sine 1000Hz (audio determinista)
+      - -f
+      - lavfi
+      - -i
+      - "sine=f=1000:r=48000:d=0"
+      # Map: video directo + audio directo (sin filtros complejos)
+      - -map
+      - "0"
+      - -map
+      - "1"
+      # Codificación vídeo: H.264 baseline, yuv420p, GOP 30 frames = 1s @ 30fps (SLA <700ms, issue #133)
+      - -c:v
+      - libx264
+      - -profile:v
+      - baseline
+      - -bf
+      - "0"
+      - -g
+      - "30"
+      - -keyint_min
+      - "30"
+      - -sc_threshold
+      - "0"
+      - -preset
+      - veryfast
+      - -tune
+      - zerolatency
+      - -pix_fmt
+      - yuv420p
+      - -r
+      - "30"
+      # Codificación audio: AAC 48kHz 2ch
+      - -c:a
+      - aac
+      - -ar
+      - "48000"
+      - -ac
+      - "2"
+      - -b:a
+      - 128k
+      # Output: MPEG-TS a SRT
+      - -f
+      - mpegts
+      - "srt://srt-ingest:8890?mode=caller&streamid=live1&latency=500"
+    depends_on:
+      srt-ingest:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "50m", max-file: "3" }
+
   # ── KrakenD API Gateway ────────────────────────────────────────────────────
   krakend:
     image: devopsfaith/krakend:2.6
