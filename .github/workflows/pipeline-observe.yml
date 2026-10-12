@@ -6,7 +6,12 @@ name: Pipeline Observations
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # Offset to avoid GitHub's high-load minutes (0,5,10,15,20,25,30,35,40,45,50,55).
+    # GitHub often skips or delays crons at those minutes. This pattern (3-59/10) fires at
+    # 3, 13, 23, 33, 43, 53 — offsets by 3 min from multiples of 10, staying within the
+    # 10-minute cadence SLA and avoiding scheduling contention.
+    # See: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+    - cron: '3-59/10 * * * *'
   workflow_dispatch:
 
 permissions:
