@@ -1,7 +1,7 @@
 import * as Moq from '@moq/net';
 import { Signal } from '@moq/signals';
 import * as Watch from '@moq/watch';
-import { CircularBuffer, percentile, HISTORY_SIZE } from './metrics.js';
+import { CircularBuffer, percentile, shouldPostLatencyMetrics, HISTORY_SIZE } from './metrics.js';
 
 const _params = new URLSearchParams(location.search);
 if (_params.get('embed') === '1') document.body.classList.add('embed');
@@ -188,12 +188,14 @@ setInterval(() => {
         timestamp: new Date().toISOString(),
       };
       window.__moqMetrics = metrics;
-      // Push to Vite dev plugin (no-op in production since endpoint won't exist)
-      fetch('/metrics/latency', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(metrics),
-      }).catch(() => { /* dev-only endpoint, ignore errors in production */ });
+      // Only POST to dev endpoint if in dev mode; in production, endpoint doesn't exist
+      if (shouldPostLatencyMetrics(import.meta.env.DEV)) {
+        fetch('/metrics/latency', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(metrics),
+        }).catch(() => { /* should not happen in dev */ });
+      }
     } else if (_sampleCount === 0) {
       window.__moqMetrics = {
         samples: 0, p50_ms: null, p95_ms: null, last_ms: null,
