@@ -45,7 +45,7 @@ en admin: 1) ingesta vídeo/audio/data, 2) flujo MoQ + relay, 3) player.
 - [x] deploy.yml (reinicio tras srt-ingest), runbook, sonda `scripts/probe-source-ffmpeg.sh`.
 - [x] refuter-correctness + refuter-tests en paralelo sobre el delta final: sin
       HIGH/CRITICAL (informe del developer; el Arquitecto verificó tests y arranque de ffmpeg).
-- [ ] PR abierto y vinculado al proyecto #3.
+- [x] PR #209 abierto, vinculado al proyecto #3 y mergeado (9d00b8c).
 - [ ] Gate producción (PENDIENTE, no desplegado): `source-ffmpeg` running sin reinicios
       >=10 min, sonda state=running, srt-ingest con SRT recibiendo bytes.
 - [ ] Gate humana (PENDIENTE): operador confirma con fecha que ve/oye la fuente.
@@ -64,12 +64,23 @@ en admin: 1) ingesta vídeo/audio/data, 2) flujo MoQ + relay, 3) player.
   en IDR). Ahora `-g 30 -keyint_min 30 -sc_threshold 0` (1 s), igual que
   `config/moq-mux/run.sh`. Protegido por 3 tests de configuración nuevos (30/30 pass).
   Refuter-correctness y refuter-tests: 0 hallazgos. Commit fcc1793. Runbook corregido.
-- **Despliegue: NO realizado.** El pipeline (`deploy.yml`) solo despliega en push a `main`
-  (SSH con secrets PROD_HOST/PROD_SSH_KEY, que solo posee Actions). #204 (base de este PR)
-  está `REVIEW_REQUIRED`: `gh pr merge 204` → "base branch policy prohibits the merge";
-  no se usó `--admin`. Acceso SSH directo desde esta máquina: "Host key verification
-  failed" (no se desactivó la verificación). Sin deploy no hay evidencia de bytes
-  crecientes ni de broadcast anunciado: gates de flujo PENDIENTES.
+- **Despliegue (2026-10-12)**: #204 mergeado (5946f99) y #209 (9d00b8c), ambos con merge
+  commit y bypass admin autorizado por el usuario (el ruleset "Protect main" exige 1
+  review y el autor no puede auto-aprobarse; el rol admin tiene bypass por diseño).
+  Run deploy 38232541252 (#204) y 38232601873 (#209): success. Log del run de #209:
+  `OK source-ffmpeg`, `OK srt-ingest`; `compose ps`: source-ffmpeg "Up Less than a second"
+  (imagen jrottenberg/ffmpeg:7.1-alpine), srt-ingest "Up 45 seconds" con
+  `0.0.0.0:8890->8890/udp`. https://wow.teremoq.com/player/ y /api/health → 200.
+- **Gates de flujo NO comprobadas (PENDIENTES)**: sin acceso al servidor (SSH directo:
+  "Host key verification failed", no se desactivó) y sin endpoint público del relay
+  (`:4443/announced/` sin respuesta). Por tanto NO hay evidencia de: RestartCount estable,
+  sonda state=running, bytes SRT crecientes en dos muestras, broadcast `anon/live1`
+  anunciado. El único dato es que el contenedor arrancó (1 s tras el up), insuficiente
+  para descartar crash-loop. Comandos para el operador (en el servidor, como deploy):
+  `docker inspect -f '{{.RestartCount}} {{.State.Status}}' teremoqwow-source-ffmpeg-1`
+  (dos veces, 30 s entre ellas); `bash /opt/teremoqwow/scripts/probe-source-ffmpeg.sh`;
+  `docker logs --since 30s teremoqwow-srt-ingest-1` dos veces separadas 15 s (bytes/sesión
+  creciendo); `docker logs --tail 50 teremoqwow-moq-relay-1 | grep -i live1`.
 - CI de #204: el fallo "QoS integration" (PTS-sync / P95) es preexistente en `main`
   (mismos fallos en runs de main del 07-oct) y es de contenido, fuera de las gates de flujo.
 - `8890/udp` abierto: no verificable desde aquí (UDP); lo publica `srt-ingest` en la compose.
