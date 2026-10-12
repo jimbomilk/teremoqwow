@@ -53,15 +53,15 @@ jobs:
             
             echo ""
             echo "=== RECENT LOGS: source-ffmpeg (last 80 lines) ==="
-            docker logs --tail 80 teremoqwow-source-ffmpeg-1 2>&1 || true
+            docker logs --tail 80 teremoqwow-source-ffmpeg-1 2>&1 | tr "\r" "\n" | tail -80 | cut -c1-300 || true
             
             echo ""
             echo "=== RECENT LOGS: srt-ingest (last 80 lines) ==="
-            docker logs --tail 80 teremoqwow-srt-ingest-1 2>&1 || true
+            docker logs --tail 80 teremoqwow-srt-ingest-1 2>&1 | tr "\r" "\n" | tail -80 | cut -c1-300 || true
             
             echo ""
             echo "=== RECENT LOGS: moq-relay (last 30 lines) ==="
-            docker logs --tail 30 teremoqwow-moq-relay-1 2>&1 || true
+            docker logs --tail 30 teremoqwow-moq-relay-1 2>&1 | tr "\r" "\n" | tail -30 | cut -c1-300 || true
             
             echo ""
             echo "=== NETWORK STATS (SAMPLE 1) ==="
