@@ -44,3 +44,13 @@ export function percentile(sorted: number[], p: number): number {
   if (lo === hi) return sorted[lo];
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
+
+/**
+ * Determines whether latency metrics should be POSTed to the dev endpoint.
+ * In development mode (import.meta.env.DEV), the /metrics/latency endpoint
+ * is served by Vite's metricsLatencyPlugin. In production, there is no such
+ * endpoint and requests would 404; we skip posting to avoid console noise.
+ */
+export function shouldPostLatencyMetrics(isDev: boolean): boolean {
+  return isDev;
+}

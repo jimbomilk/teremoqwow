@@ -1,6 +1,6 @@
 // Run with: node player/src/metrics.test.ts
 // Node 24 strips TypeScript types natively; no extra flags needed.
-import { CircularBuffer, percentile } from './metrics.ts';
+import { CircularBuffer, percentile, shouldPostLatencyMetrics } from './metrics.ts';
 
 let passed = 0;
 let failed = 0;
@@ -85,6 +85,13 @@ console.log('\n=== GREEN: p50/p95 through CircularBuffer ===');
   const p95 = percentile(sorted, 0.95);
   assert(p50 >= 340 && p50 <= 360, `p50 ≈ 350 (got ${p50.toFixed(1)})`);
   assert(p95 >= 570 && p95 <= 600, `p95 ≈ 575 (got ${p95.toFixed(1)})`);
+}
+
+// ── RED/GREEN: shouldPostLatencyMetrics ──────────────────────────────────────
+console.log('\n=== shouldPostLatencyMetrics ===');
+{
+  assert(shouldPostLatencyMetrics(true) === true, 'should post metrics in dev mode (isDev=true)');
+  assert(shouldPostLatencyMetrics(false) === false, 'should NOT post metrics in production (isDev=false)');
 }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
