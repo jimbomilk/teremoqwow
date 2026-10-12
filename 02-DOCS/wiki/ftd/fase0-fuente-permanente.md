@@ -57,13 +57,28 @@ en admin: 1) ingesta vídeo/audio/data, 2) flujo MoQ + relay, 3) player.
 - `scripts/validate-schemas.sh` → "All schemas valid." (con source-status.json).
 - ffmpeg local: el comando (testsrc2+sine→libx264/aac→mpegts, 2 s a fichero) arranca y
   termina rc=0. Solo prueba que el comando es aceptado, no calidad.
-- NO verificado: `docker compose config` (falta /home/deploy/.env local), pull de la imagen
-  `jrottenberg/ffmpeg:7.1-alpine` (que traiga libx264), conexión SRT real, producción.
+- Imagen `jrottenberg/ffmpeg:7.1-alpine`: `docker manifest inspect` OK; `ffmpeg -encoders`
+  dentro de la imagen lista `libx264`. Riesgo conocido cerrado.
+- **Corrección GOP (regresión vs #133)**: la compose usaba `-g 60 -keyint_min 60` (GOP 2 s
+  @30 fps, causa raíz del incumplimiento del SLA 700 ms P95; el subscriber MoQ solo entra
+  en IDR). Ahora `-g 30 -keyint_min 30 -sc_threshold 0` (1 s), igual que
+  `config/moq-mux/run.sh`. Protegido por 3 tests de configuración nuevos (30/30 pass).
+  Refuter-correctness y refuter-tests: 0 hallazgos. Commit fcc1793. Runbook corregido.
+- **Despliegue: NO realizado.** El pipeline (`deploy.yml`) solo despliega en push a `main`
+  (SSH con secrets PROD_HOST/PROD_SSH_KEY, que solo posee Actions). #204 (base de este PR)
+  está `REVIEW_REQUIRED`: `gh pr merge 204` → "base branch policy prohibits the merge";
+  no se usó `--admin`. Acceso SSH directo desde esta máquina: "Host key verification
+  failed" (no se desactivó la verificación). Sin deploy no hay evidencia de bytes
+  crecientes ni de broadcast anunciado: gates de flujo PENDIENTES.
+- CI de #204: el fallo "QoS integration" (PTS-sync / P95) es preexistente en `main`
+  (mismos fallos en runs de main del 07-oct) y es de contenido, fuera de las gates de flujo.
+- `8890/udp` abierto: no verificable desde aquí (UDP); lo publica `srt-ingest` en la compose.
 - MEDIUM/LOW registrado (sin bloquear): el reintento si srt-ingest aún no escucha depende
   del restart de Docker (`depends_on: service_started`, sin healthcheck).
 
 ## Next
 
-Merge de #204 y esta entrega tras verificar en producción; después Fase 1 (data en
+Aprobar y mergear #204 (merge commit, no squash), retargetear #209 a main y mergearlo;
+Actions despliega. Luego medir bytes en dos lecturas. Merge de #204 y esta entrega tras verificar en producción; después Fase 1 (data en
 `anon/live1-meta`, contadores de bytes), Fase 2, Fase 3 y admin con semáforos por fase
 (automático=flujo, humano=calidad con operador+fecha).
