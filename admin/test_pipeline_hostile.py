@@ -186,3 +186,17 @@ def test_phase_observed_at_is_the_most_recent_signal_observation_and_clocks_unto
     assert tr["last_green_at"] == "2026-10-12T12:00:30Z"         # instante de evaluación, no observed_at
     assert new_state["phases"]["ingest"]["last_transition_at"] == "2026-10-12T11:00:00Z"
     assert [e for e in events if e["phase"] == "ingest"] == []
+
+
+def test_observed_at_is_max_in_every_phase_not_only_ingest():
+    """R3: 9 PASS frescas con segundos distintos; la fase expone la observación MÁS RECIENTE en las 3 fases."""
+    import pipeline_state as P
+    t = S.T0
+    seconds = {"ingest.video": 14, "ingest.audio": 13, "ingest.data": 12,
+               "relay.public": 10, "relay.announce": 9, "relay.catalog": 8, "relay.tracks": 7,
+               "player.http": 6, "player.subscribe": 5}
+    obs = {sig: S.observation(sig, "PASS", t.replace(second=sec), "ok") for sig, sec in seconds.items()}
+    snap_, _, _ = P.build_snapshot(obs, {}, None, t.replace(second=30))
+    got = {p["id"]: p["transport"]["observed_at"] for p in snap_["phases"]}
+    assert got == {"ingest": "2026-10-12T12:00:14Z", "relay": "2026-10-12T12:00:10Z",
+                   "player": "2026-10-12T12:00:06Z"}

@@ -199,3 +199,57 @@ test('un reload lanzado por una acción de una instancia caducada no pinta', asy
   await click;
   assert.equal(state.contents.length, paints);
 });
+
+// R2 (ronda 3): la recarga de una acción debe quedar ligada a la generación del CLIC (no a la vigente al recargar,
+// ni solo a currentPage). Mata mutantes `reload: () => refresh({... isActive: () => currentPage === 'pipeline'})`
+// y `reload: () => reloadFor(generation)()`.
+test('acción de A: su recarga recibe snapshot OK y espera el historial; se navega y vuelve; B pinta DOWN; el historial tardío de A no pinta ni deja verde', async () => {
+  await page.loadPipeline();                           // A (gen 1)
+  const [, onClick] = state.listeners[0];
+  const gate = deferred();
+  state.handler = (p, o) => {
+    if (o && o.method === 'POST') return resp(201, {});
+    if (p.startsWith('/admin/pipeline/status')) return resp(200, GREEN);
+    return gate.p.then(() => resp(200, HIST));          // historial de la recarga de A: pendiente
+  };
+  const click = onClick({ target: { closest: () => ({ dataset: { phase: 'ingest', action: 'verify' } }) } });
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(state.calls.some((c) => c.method === 'POST'), 'la acción se ejecutó');
+  navigateTo('otra');
+  store.setCurrentPage('pipeline');                    // vuelta a Pipeline
+  state.handler = (p) => (p.startsWith('/admin/pipeline/status') ? resp(200, DOWN) : resp(200, HIST));
+  await page.loadPipeline();                           // B (gen 2) completa con DOWN
+  assert.match(last(), /transport-down/);
+  const paintsB = state.contents.length;
+  gate.res();                                          // el historial de la recarga de A llega tarde
+  await click;
+  assert.equal(state.contents.length, paintsB, 'cero pintados adicionales');
+  assert.match(last(), /transport-down/);
+  assert.doesNotMatch(last(), /transport-ok/);
+  navigateTo('x');
+});
+
+// R2 variante: el POST de A termina DESPUÉS de que B ya cargó; la recarga se lanza tarde y debe seguir ligada a la
+// generación del clic (mata `reload: () => reloadFor(generation)()`, que evaluaría la generación vigente al recargar).
+test('acción de A cuyo POST termina tras volver a Pipeline y cargar B: su recarga tardía (snapshot OK) no pinta', async () => {
+  await page.loadPipeline();                           // A
+  const [, onClick] = state.listeners[0];
+  const gate = deferred();
+  state.handler = (p, o) => (o && o.method === 'POST' ? gate.p.then(() => resp(201, {})) : resp(200, DOWN));
+  const click = onClick({ target: { closest: () => ({ dataset: { phase: 'ingest', action: 'verify' } }) } });
+  await new Promise((r) => setImmediate(r));
+  navigateTo('otra');
+  store.setCurrentPage('pipeline');
+  await page.loadPipeline();                           // B pinta DOWN
+  assert.match(last(), /transport-down/);
+  const paintsB = state.contents.length;
+  state.handler = (p, o) => (o && o.method === 'POST' ? resp(201, {})
+    : p.startsWith('/admin/pipeline/status') ? resp(200, GREEN) : resp(200, HIST));  // la recarga de A vería verde
+  gate.res();
+  await click;
+  assert.ok(state.calls.some((c) => c.path === '/admin/pipeline/status'), 'la recarga tardía sí consultó');
+  assert.equal(state.contents.length, paintsB, 'cero pintados adicionales');
+  assert.doesNotMatch(last(), /transport-ok/);
+  navigateTo('x');
+});
