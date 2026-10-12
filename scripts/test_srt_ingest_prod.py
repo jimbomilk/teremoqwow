@@ -224,8 +224,8 @@ def test_deploy_service_selection_infra_only(deploy_script):
         changed_auth="false",
         changed_config="false",
     )
-    assert services == {"nginx", "srt-ingest"}, (
-        f"CHANGED_INFRA=true debe dar exactamente {{nginx, srt-ingest}}. Got: {services}"
+    assert services == {"nginx", "srt-ingest", "source-ffmpeg"}, (
+        f"CHANGED_INFRA=true debe dar {{nginx, srt-ingest, source-ffmpeg}}. Got: {services}"
     )
 
 

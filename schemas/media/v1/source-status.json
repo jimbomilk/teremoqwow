@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/media/v1/source-status.json",
+  "title": "PermanentSourceStatus",
+  "description": "Salida JSON de la sonda de la fuente FFmpeg permanente (source-ffmpeg). Informa SOLO del camino de datos: si el contenedor está vivo y publicando por SRT a srt-ingest con la misma ruta que el emisor real. NO afirma nada sobre el contenido audiovisual (no hay inspección de códec, fps ni audio): que se vea y se oiga lo confirma una persona abriendo el player. La data va en Fase 1 (broadcast hermano anon/live1-meta).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "state", "target", "streamid", "checked_at"],
+  "properties": {
+    "source": { "type": "string", "const": "source-ffmpeg" },
+    "state": {
+      "type": "string",
+      "enum": ["running", "restarting", "down", "unknown"],
+      "description": "running: contenedor activo y publicando; restarting: reinicio en curso; down: no existe/parado; unknown: no se pudo determinar."
+    },
+    "target": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+:[0-9]{1,5}$",
+      "description": "host:puerto SRT interno, p. ej. srt-ingest:8890."
+    },
+    "streamid": { "type": "string", "minLength": 1, "description": "Stream ID SRT; nunca vacío (el listener lo rechaza)." },
+    "broadcast": { "type": "string", "const": "anon/live1" },
+    "restart_count": { "type": "integer", "minimum": 0 },
+    "checked_at": { "type": "string", "format": "date-time" },
+    "error": { "type": "string" }
+  }
+}
