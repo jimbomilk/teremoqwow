@@ -29,7 +29,101 @@ def job(wf):
 def test_triggers(wf):
     on = wf.get("on", wf.get(True))  # PyYAML parsea `on` como True
     assert set(on) == {"schedule", "workflow_dispatch"}
-    assert on["schedule"] == [{"cron": "*/10 * * * *"}]
+    assert on["schedule"] == [{"cron": "3-59/10 * * * *"}]
+
+
+def _expand_cron_minutes(cron_expr: str) -> list[int]:
+    """Expande la parte de minutos de un cron a la lista de minutos que dispara.
+    
+    Soporta: 
+      - */N (cada N minutos): 0, N, 2N, ...
+      - M-N/K (rango con step): M, M+K, M+2K, ..., hasta N
+      - M,N,O (lista): M, N, O
+      - * (todos): 0-59
+    
+    No soporta nombres (mon, tue, etc).
+    """
+    parts = cron_expr.split()
+    if len(parts) < 5:
+        raise ValueError(f"Cron incompleto: {cron_expr}")
+    
+    min_part = parts[0]
+    
+    if min_part == "*":
+        return list(range(60))
+    
+    minutes = []
+    for expr in min_part.split(","):
+        if "/" in expr:
+            # */10 o 3-59/10
+            base, step = expr.split("/")
+            step = int(step)
+            if base == "*":
+                minutes.extend(range(0, 60, step))
+            else:
+                # M-N/K
+                start, end = map(int, base.split("-"))
+                minutes.extend(range(start, end + 1, step))
+        elif "-" in expr:
+            # M-N (sin step, cada minuto)
+            start, end = map(int, expr.split("-"))
+            minutes.extend(range(start, end + 1))
+        else:
+            # Minuto único
+            minutes.append(int(expr))
+    
+    return sorted(set(minutes))
+
+
+def test_schedule_avoids_high_load_minutes(wf):
+    """Verifica que el cron NO dispare en minutos de alta carga de GitHub.
+    
+    GitHub descarta/retrasa crons en minutos redondos: 0,5,10,15,20,25,30,35,40,45,50,55.
+    Este test falla si el workflow usa esos minutos.
+    """
+    on = wf.get("on", wf.get(True))
+    assert "schedule" in on, "Falta trigger schedule"
+    assert on["schedule"], "schedule está vacío"
+    
+    cron = on["schedule"][0].get("cron")
+    assert cron, "No hay cron en el primer schedule"
+    
+    # Minutos de alta carga que GitHub tiende a ignorar/retrasar
+    high_load_minutes = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}
+    
+    fired_minutes = _expand_cron_minutes(cron)
+    
+    # Ningún minuto disparado debe estar en high_load_minutes
+    bad_minutes = set(fired_minutes) & high_load_minutes
+    assert not bad_minutes, (
+        f"Cron '{cron}' dispara en minutos de alta carga {sorted(bad_minutes)}. "
+        f"GitHub los ignora/retrasa. Minutos seguros: {sorted(set(range(60)) - high_load_minutes)}"
+    )
+
+
+def test_schedule_interval_at_most_10_minutes(wf):
+    """Verifica que el intervalo máximo entre disparos sea ≤10 minutos."""
+    on = wf.get("on", wf.get(True))
+    assert "schedule" in on
+    cron = on["schedule"][0].get("cron")
+    assert cron
+    
+    fired_minutes = sorted(_expand_cron_minutes(cron))
+    assert fired_minutes, "Cron no dispara en ningún minuto"
+    
+    # Intervalo máximo es la diferencia máxima entre disparos consecutivos.
+    # También consideramos el intervalo de 59->0 (vuelta a la hora siguiente).
+    intervals = []
+    for i in range(len(fired_minutes) - 1):
+        intervals.append(fired_minutes[i+1] - fired_minutes[i])
+    # Intervalo de última ejecución a primera del siguiente ciclo
+    intervals.append(60 - fired_minutes[-1] + fired_minutes[0])
+    
+    max_interval = max(intervals)
+    assert max_interval <= 10, (
+        f"Cron '{cron}' tiene intervalo máximo {max_interval} min (>10). "
+        f"Disparos: {fired_minutes}"
+    )
 
 
 def test_permissions_read_only(wf, job):
