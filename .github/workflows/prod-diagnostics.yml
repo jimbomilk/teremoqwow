@@ -1,0 +1,79 @@
+name: Production Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  prod-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run production diagnostics
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: deploy
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: 22
+          timeout: 120s
+          script: |
+            echo "=== TIMESTAMP ==="
+            date -u
+            
+            echo ""
+            echo "=== GIT REVISION ==="
+            cd /opt/teremoqwow && git rev-parse --short HEAD || true
+            
+            echo ""
+            echo "=== CONTAINER STATUS ==="
+            COMPOSE="docker compose -f /opt/teremoqwow/docker-compose.prod.yml"
+            $COMPOSE ps -a || true
+            
+            echo ""
+            echo "=== CONTAINER DETAILS: source-ffmpeg ==="
+            docker inspect -f '{{.Name}} restarts={{.RestartCount}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} error={{.State.Error}}' teremoqwow-source-ffmpeg-1 || true
+            
+            echo ""
+            echo "=== CONTAINER DETAILS: srt-ingest ==="
+            docker inspect -f '{{.Name}} restarts={{.RestartCount}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} error={{.State.Error}}' teremoqwow-srt-ingest-1 || true
+            
+            echo ""
+            echo "=== CONTAINER DETAILS: moq-relay ==="
+            docker inspect -f '{{.Name}} restarts={{.RestartCount}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} error={{.State.Error}}' teremoqwow-moq-relay-1 || true
+            
+            echo ""
+            echo "=== RECENT LOGS: source-ffmpeg (last 80 lines) ==="
+            docker logs --tail 80 teremoqwow-source-ffmpeg-1 2>&1 || true
+            
+            echo ""
+            echo "=== RECENT LOGS: srt-ingest (last 80 lines) ==="
+            docker logs --tail 80 teremoqwow-srt-ingest-1 2>&1 || true
+            
+            echo ""
+            echo "=== RECENT LOGS: moq-relay (last 30 lines) ==="
+            docker logs --tail 30 teremoqwow-moq-relay-1 2>&1 || true
+            
+            echo ""
+            echo "=== NETWORK STATS (SAMPLE 1) ==="
+            docker stats --no-stream --format '{{.Name}} net={{.NetIO}}' teremoqwow-srt-ingest-1 teremoqwow-source-ffmpeg-1 || true
+            
+            echo ""
+            echo "=== WAITING 15 SECONDS ==="
+            sleep 15
+            
+            echo ""
+            echo "=== NETWORK STATS (SAMPLE 2) ==="
+            docker stats --no-stream --format '{{.Name}} net={{.NetIO}}' teremoqwow-srt-ingest-1 teremoqwow-source-ffmpeg-1 || true
+            
+            echo ""
+            echo "=== DIAGNOSTICS COMPLETE ==="
