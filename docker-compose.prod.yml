@@ -86,19 +86,23 @@ services:
     networks: [teremoqwow-prod]
     # Nota: Esperar a srt-ingest garantiza que el listener UDP está listo.
     # Si srt-ingest falla conectar al relay, ffmpeg puede reintentar vía restart policy.
-    # Video: testsrc2 determinista (patrón de test)
-    # Audio: sine 1kHz determinista
+    # Video: testsrc2 determinista (patrón de test, duración infinita por default)
+    # Audio: sine 1kHz determinista (duración infinita por default)
+    # INCIDENTE FIX: d=0 en testsrc2 → frame=0 en jrottenberg/ffmpeg:7.1-alpine.
+    # SOLUCIÓN: quitar d=0 de ambas entradas, añadir -re (pacing) antes de cada lavfi.
     command:
-      # Entrada: testsrc2 a 1280x720 30fps
+      # Entrada: testsrc2 a 1280x720 30fps (sin d=, duración infinita)
+      - -re
       - -f
       - lavfi
       - -i
-      - "testsrc2=s=1280x720:r=30:d=0"
-      # Entrada: sine 1000Hz (audio determinista)
+      - "testsrc2=s=1280x720:r=30"
+      # Entrada: sine 1000Hz (audio determinista, sin d=, duración infinita)
+      - -re
       - -f
       - lavfi
       - -i
-      - "sine=f=1000:r=48000:d=0"
+      - "sine=f=1000:r=48000"
       # Map: video directo + audio directo (sin filtros complejos)
       - -map
       - "0"

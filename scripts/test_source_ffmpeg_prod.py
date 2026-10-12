@@ -559,5 +559,244 @@ class TestRunbook:
         )
 
 
+class TestSourceFFmpegIncidentFix:
+    """
+    INCIDENTE DE PRODUCCIÓN (FIX-SOURCE-FFMPEG-FRAMES):
+    
+    En producción (jrottenberg/ffmpeg:7.1-alpine), `testsrc2=d=0` genera duración CERO
+    → ffmpeg statsframe=0 (CERO frames de vídeo), mientras que `sine d=0` SÍ es infinito
+    (diferencia semántica en estos dos filtros lavfi).
+    
+    Resultado: ffmpeg emitía SOLO AUDIO (sin vídeo) a 51x velocidad real (~1 MB/s),
+    sin pacing. El catálogo MoQ nunca se generaba ('subscribed error internal error' 
+    en srt-ingest).
+    
+    ARREGLO REQUERIDO:
+    1. Entrada lavfi de vídeo (testsrc2) NO debe llevar d=0 ni ninguna duración (clave d/duration).
+    2. CADA entrada lavfi debe ir precedida de EXACTAMENTE UN `-re` dentro de su grupo de entrada.
+    3. Audio: se elimina toda duración (d/duration) por uniformidad.
+    
+    REFERENCIA: https://github.com/teremoqwow/teremoqwow/issues/XXX (FIX-SOURCE-FFMPEG-FRAMES)
+    """
+
+    @staticmethod
+    def _parse_lavfi_params(filter_spec: str) -> dict:
+        """
+        Parsea una especificación lavfi como pares clave=valor.
+        
+        Ejemplo:
+        - "testsrc2=s=1280x720:r=30" → {"s": "1280x720", "r": "30"}
+        - "sine=f=1000:r=48000" → {"f": "1000", "r": "48000"}
+        
+        Retorna dict {clave: valor, ...}
+        """
+        if "=" not in filter_spec:
+            return {}
+        
+        # Separa filter_name=params
+        parts = filter_spec.split("=", 1)
+        if len(parts) < 2:
+            return {}
+        
+        params_str = parts[1]
+        params = {}
+        
+        # Split por ":" (separador de parámetros en lavfi)
+        for param in params_str.split(":"):
+            if "=" in param:
+                key, val = param.split("=", 1)
+                params[key] = val
+        
+        return params
+
+    @staticmethod
+    def _group_input_tokens(cmd: List[str]) -> List[List[int]]:
+        """
+        Agrupa los índices de tokens por entrada lavfi.
+        
+        Cada grupo contiene los índices de los tokens que pertenecen a una entrada:
+        [tokens previos] -i <filter_spec> [tokens siguientes hasta la próxima -i]
+        
+        Retorna lista de listas: [[índices del grupo 0], [índices del grupo 1], ...]
+        """
+        groups = []
+        current_group_start = None
+        
+        for i, arg in enumerate(cmd):
+            if arg == "-i" and i + 1 < len(cmd):
+                # Este es un marcador de entrada
+                if current_group_start is not None:
+                    # Finaliza el grupo anterior
+                    groups.append((current_group_start, i - 1))
+                
+                # Inicia nuevo grupo desde hace poco antes del -i
+                # Buscamos hacia atrás para incluir -f lavfi, -re, etc.
+                # Retrocedemos hasta encontrar otro -i o el inicio
+                start = i
+                for j in range(i - 1, -1, -1):
+                    if cmd[j] == "-i":
+                        start = j + 1
+                        break
+                    start = j
+                
+                current_group_start = start
+        
+        # Finaliza el último grupo
+        if current_group_start is not None:
+            groups.append((current_group_start, len(cmd) - 1))
+        
+        return groups
+
+    @staticmethod
+    def _has_duration_key(params: dict) -> bool:
+        """Verifica si los parámetros contienen alguna clave de duración.
+        
+        Rechaza tanto 'd' como 'duration' (alias en lavfi).
+        Rechaza cualquier valor: 'd=0', 'd=5', 'd=.5', 'd=+5', 'd=-1', etc.
+        """
+        return "d" in params or "duration" in params
+
+    def test_testsrc2_video_does_not_have_duration_keys(self, service):
+        """
+        HIGH-1: testsrc2 NO debe tener NINGUNA clave de duración (d o duration).
+        
+        Parseamos los parámetros como pares clave=valor y rechazamos ambas claves.
+        
+        MUTANTES MATA:
+        - testsrc2=s=1280x720:r=30:d=0 (cero)
+        - testsrc2=s=1280x720:r=30:d=30 (valor finito)
+        - testsrc2=s=1280x720:r=30:duration=0 (alias 'duration')
+        - testsrc2=s=1280x720:r=30:d=.5 (decimal)
+        - testsrc2=s=1280x720:r=30:d=+5 (signo +)
+        - testsrc2=s=1280x720:r=30:d=-1 (signo -)
+        
+        MUTANTES NO MATA:
+        - testsrc2=s=1280x720:r=30 (sin d= ni duration=)
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        assert "testsrc2" in cmd_str, "Falta testsrc2 en command"
+        
+        # Extrae el parámetro testsrc2=...
+        match = re.search(r'testsrc2=([^"\s:]+(?::[^"\s:]+)*)', cmd_str)
+        assert match, f"No se puede parsear testsrc2=... en: {cmd_str}"
+        
+        testsrc2_spec = "testsrc2=" + match.group(1)
+        params = self._parse_lavfi_params(testsrc2_spec)
+        
+        assert not self._has_duration_key(params), (
+            f"testsrc2 NO debe llevar clave 'd' ni 'duration'. "
+            f"INCIDENTE: d=0 en testsrc2 → frame=0 en jrottenberg/ffmpeg:7.1-alpine. "
+            f"Solución: Eliminar completamente d= o duration= de testsrc2. "
+            f"Encontrado: {testsrc2_spec} → params={params}"
+        )
+
+    def test_sine_audio_does_not_have_duration_keys(self, service):
+        """
+        HIGH-1: sine (audio) tampoco debe tener NINGUNA clave de duración (d o duration).
+        
+        Por uniformidad: si vídeo no lleva duración, audio tampoco.
+        Aunque sine d=0 SÍ es infinito (diferente de testsrc2), la claridad de intent
+        es preferible.
+        
+        MUTANTES MATA:
+        - sine=f=1000:r=48000:d=0
+        - sine=f=1000:r=48000:d=5
+        - sine=f=1000:r=48000:duration=0
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        if "sine" not in cmd_str:
+            pytest.skip("No hay entrada sine en command")
+        
+        # Extrae el parámetro sine=...
+        match = re.search(r'sine=([^"\s:]+(?::[^"\s:]+)*)', cmd_str)
+        assert match, f"No se puede parsear sine=... en: {cmd_str}"
+        
+        sine_spec = "sine=" + match.group(1)
+        params = self._parse_lavfi_params(sine_spec)
+        
+        assert not self._has_duration_key(params), (
+            f"sine NO debe llevar clave 'd' ni 'duration' (por uniformidad con vídeo). "
+            f"Encontrado: {sine_spec} → params={params}"
+        )
+
+    def test_each_lavfi_input_has_exactly_one_re_pacing(self, service):
+        """
+        HIGH-2: Cada entrada lavfi DEBE tener EXACTAMENTE UNO `-re` en su grupo de entrada.
+        
+        Agrupa tokens por entrada (-i) y verifica que dentro de cada grupo
+        hay exactamente un `-re` (no cero, no duplicado).
+        
+        `-re` puede estar en cualquier posición del grupo, incluso cruzando `-f lavfi`:
+        - Válido: -re -f lavfi -i "testsrc2=..."
+        - Válido: -f lavfi -re -i "testsrc2=..."
+        
+        Rechaza:
+        - MUTANTE: -f lavfi -i "testsrc2=..." (sin -re, posición 0)
+        - MUTANTE: -re -re -f lavfi -i "testsrc2=..." -f lavfi -i "sine=..." (re duplicado)
+        - MUTANTE: -metadata -re -f lavfi -i "sine=..." (-re como valor de opción)
+        
+        LÓGICA: 
+        1. Agrupa tokens por entrada (desde el final del grupo anterior hasta -i)
+        2. Para cada grupo, cuenta cuántos `-re` hay
+        3. Verifica que EXACTAMENTE 1 `-re` está presente
+        4. Verifica que `-re` NO es valor de otra opción (ej. -metadata -re)
+        """
+        cmd = service.get("command", [])
+        cmd_str = " ".join(str(c) for c in cmd)
+        
+        # Encuentra todas las posiciones de "-i"
+        input_positions = [i for i, arg in enumerate(cmd) if arg == "-i"]
+        assert len(input_positions) > 0, "Debe haber al menos una entrada (-i)"
+        
+        # Para cada entrada, crea su grupo
+        for input_idx, i_pos in enumerate(input_positions):
+            # Determina inicio del grupo (final del grupo anterior o inicio del comando)
+            if input_idx == 0:
+                group_start = 0
+            else:
+                # Desde después de la entrada anterior hasta antes del -i actual
+                group_start = input_positions[input_idx - 1] + 2  # +2 para saltar -i y su valor
+            
+            group_end = i_pos - 1  # Hasta justo antes de -i
+            
+            # Extrae el grupo de tokens
+            group_tokens = cmd[group_start:group_end + 1]
+            
+            # Cuenta cuántos -re hay en el grupo
+            re_count = sum(1 for tok in group_tokens if tok == "-re")
+            
+            # Verifica que NO se duplicó y que está presente
+            assert re_count == 1, (
+                f"Entrada {input_idx} (posición {i_pos}): se encontraron {re_count} `-re` "
+                f"en su grupo. DEBE haber EXACTAMENTE 1. "
+                f"Grupo: {' '.join(group_tokens)} "
+                f"INCIDENTE: -re fuerza pacing en tiempo real. Sin él, ffmpeg corre a ~51x. "
+                f"Comando: {cmd_str}"
+            )
+            
+            # Verifica que -re NO está siendo usado como valor de otra opción
+            # (ej. -metadata -re, donde -re es el valor esperado de -metadata)
+            for j, tok in enumerate(group_tokens):
+                if tok == "-re":
+                    # Verifica que el token ANTERIOR no es una opción que espera un valor
+                    if j > 0:
+                        prev_tok = group_tokens[j - 1]
+                        # Opciones que esperan un valor (common ffmpeg flags)
+                        value_expecting_options = {
+                            "-metadata", "-title", "-author", "-comment", "-copyright",
+                            "-creation_time", "-bitrate", "-c", "-codec", "-c:v", "-c:a",
+                            "-vcodec", "-acodec", "-preset", "-tune", "-profile", "-level"
+                        }
+                        assert prev_tok not in value_expecting_options, (
+                            f"Entrada {input_idx}: `-re` está siendo usado como valor "
+                            f"de '{prev_tok}', no como opción de pacing. "
+                            f"Grupo: {' '.join(group_tokens)}"
+                        )
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
