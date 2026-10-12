@@ -1707,6 +1707,18 @@ def _llm_openai_generate(prompt: str, zone_hint: str) -> dict:
     return _llm_stub_generate(prompt, zone_hint)
 
 
+# ── MÓDULO: Pipeline Status (#214) — lógica en pipeline_api.py; aquí solo el registro ──────
+import pipeline_api  # noqa: E402
+
+app.register_blueprint(pipeline_api.create_blueprint(
+    require_role=lambda *roles: _require_role(*roles),
+    audit=lambda claims, action, detail="": _audit(claims, action, detail),
+    get_redis=lambda: _redis(),
+    analyst_roles=ANALYST_ROLES,
+    operator_roles=OPERATOR_ROLES,
+))
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("ADMIN_API_PORT", "9004"))
     app.run(host="0.0.0.0", port=port)

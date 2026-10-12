@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/admin/v1/pipeline-observation.json",
+  "title": "PipelineObservation",
+  "description": "Observación de TRANSPORTE de una señal del pipeline, producida por el colector del host de producción y escrita en Redis por la CLI pipeline_ingest.py (no hay endpoint HTTP de escritura). SOLO afirma llegada de datos/disponibilidad: result PASS = hubo datos/respuesta en la ventana; FAIL = se midió y no hubo; UNKNOWN = no se pudo medir. NUNCA contiene ni permite inferir calidad audiovisual (sin frames, códec, fps, ffprobe ni navegador headless).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signal", "result", "observed_at", "reason"],
+  "properties": {
+    "signal": {
+      "type": "string",
+      "enum": [
+        "ingest.video", "ingest.audio", "ingest.data",
+        "relay.public", "relay.announce", "relay.catalog", "relay.tracks",
+        "player.http", "player.subscribe"
+      ],
+      "description": "ingest.* = Fase 1; relay.* = Fase 2; player.* = Fase 3. TTL por señal definido en pipeline-snapshot.json (ttl_seconds)."
+    },
+    "result": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "observed_at": { "type": "string", "format": "date-time", "description": "Instante de la medición (UTC). Rechazado si está más de 60 s en el futuro." },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Causa legible, solo hechos de transporte." },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Métricas mínimas de llegada de datos. bytes/objects se miden durante window_seconds.",
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0 },
+        "objects": { "type": "integer", "minimum": 0 },
+        "window_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "http_status": { "type": "integer", "minimum": 100, "maximum": 599 }
+      }
+    }
+  }
+}

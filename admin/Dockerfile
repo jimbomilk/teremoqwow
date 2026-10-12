@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir \
     redis==5.0.8
 
 COPY api/admin_server.py ./admin_server.py
+COPY api/pipeline_*.py ./
 
 EXPOSE 9004
 CMD ["gunicorn", "--bind", "0.0.0.0:9004", "--workers", "2", "--timeout", "60", "admin_server:app"]

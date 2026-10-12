@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/admin/v1/pipeline-snapshot.json",
+  "title": "PipelineSnapshot",
+  "description": "Respuesta de GET /admin/pipeline/status (200). Dos estados SEPARADOS por fase: transport (automático, solo llegada de datos) y human (verificación humana audiovisual). Reglas: señal OK=fresca+PASS, DOWN=fresca+FAIL, UNKNOWN=nunca observada | caducada (freshness STALE) | resultado UNKNOWN. own_status de fase: todas OK→OK; todas UNKNOWN→UNKNOWN; ninguna OK y alguna DOWN→DOWN; resto→DEGRADED. Dependencia: la fase N+1 es BLOCKED si la N está DOWN, UNKNOWN o BLOCKED (blocked_by indica la causa; own_status y signals siguen visibles). DEGRADED aguas arriba NO bloquea: la fase siguiente se evalúa con sus propias observaciones y su reason lo anota. Sin Redis la API responde 503 REDIS_UNAVAILABLE (common/v1/error.json con details.status=UNKNOWN), nunca un snapshot verde.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generated_at", "phases"],
+  "properties": {
+    "generated_at": { "type": "string", "format": "date-time" },
+    "phases": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "Siempre 3 fases en orden: ingest, relay, player.",
+      "items": { "$ref": "#/$defs/phase" }
+    }
+  },
+  "$defs": {
+    "transportStatus": { "type": "string", "enum": ["OK", "DEGRADED", "DOWN", "BLOCKED", "UNKNOWN"] },
+    "signalStatus": { "type": "string", "enum": ["OK", "DOWN", "UNKNOWN"] },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal", "status", "freshness", "ttl_seconds", "reason", "observed_at"],
+      "properties": {
+        "signal": { "$ref": "https://teremoqwow.dev/schemas/admin/v1/pipeline-observation.json#/properties/signal" },
+        "status": { "$ref": "#/$defs/signalStatus" },
+        "freshness": { "type": "string", "enum": ["FRESH", "STALE", "NEVER"], "description": "STALE (observación caducada) no es un fallo real: status=UNKNOWN." },
+        "ttl_seconds": { "type": "integer", "minimum": 1, "description": "TTL explícito de la señal (1200 s para todas en v1)." },
+        "reason": { "type": "string" },
+        "observed_at": { "type": ["string", "null"], "format": "date-time" },
+        "last_transition_at": { "type": ["string", "null"], "format": "date-time" },
+        "last_green_at": { "type": ["string", "null"], "format": "date-time" },
+        "metrics": { "$ref": "https://teremoqwow.dev/schemas/admin/v1/pipeline-observation.json#/properties/metrics" }
+      }
+    },
+    "humanVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "description": "Verificación humana audiovisual. Independiente del transporte; sin TTL (se muestra su antigüedad). verified_by sale del JWT, verified_at del reloj del servidor.",
+      "properties": {
+        "status": { "type": "string", "enum": ["VERIFIED", "NOT_VERIFIED"] },
+        "verified_by": { "type": "string" },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "note": { "type": "string", "maxLength": 500 },
+        "last_revoked_by": { "type": "string" },
+        "last_revoked_at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "VERIFIED" } } },
+          "then": { "required": ["verified_by", "verified_at"] }
+        }
+      ]
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "index", "title", "transport", "human", "signals"],
+      "properties": {
+        "id": { "type": "string", "enum": ["ingest", "relay", "player"] },
+        "index": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "title": { "type": "string" },
+        "transport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "own_status", "reason", "observed_at", "last_transition_at", "last_green_at", "stale"],
+          "properties": {
+            "status": { "$ref": "#/$defs/transportStatus" },
+            "own_status": { "$ref": "#/$defs/transportStatus", "description": "Estado calculado solo con las señales propias (nunca BLOCKED)." },
+            "blocked_by": { "type": "string", "enum": ["ingest", "relay"], "description": "Presente solo si status=BLOCKED." },
+            "reason": { "type": "string" },
+            "observed_at": { "type": ["string", "null"], "format": "date-time", "description": "Observación más reciente de la fase." },
+            "last_transition_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_green_at": { "type": ["string", "null"], "format": "date-time" },
+            "stale": { "type": "boolean", "description": "true si alguna señal está caducada o nunca observada." }
+          }
+        },
+        "human": { "$ref": "#/$defs/humanVerification" },
+        "signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } }
+      }
+    }
+  }
+}

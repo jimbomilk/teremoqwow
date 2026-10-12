@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/admin/v1/pipeline-verification-command.json",
+  "title": "PipelineVerificationCommand",
+  "description": "Cuerpo de POST /admin/pipeline/phases/{phase}/verification (verificar) y DELETE (revocar). Roles: admin, superadmin, operator (JWT RS256). El operador y el timestamp NUNCA vienen del cliente: se derivan del JWT (email, o sub) y del reloj del servidor; cualquier campo distinto de note/reason → 400 VALIDATION_ERROR. {phase}: ingest|relay|player, otro → 404 PHASE_NOT_FOUND. POST → 201 {phase, human}; 409 ALREADY_VERIFIED si ya VERIFIED. DELETE → 200 {phase, human}; 409 NOT_VERIFIED si no estaba verificada. Sin token → 401, rol insuficiente → 403, sin Redis → 503 REDIS_UNAVAILABLE.",
+  "anyOf": [
+    {
+      "title": "VerifyBody",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "note": { "type": "string", "maxLength": 500 } }
+    },
+    {
+      "title": "RevokeBody",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "reason": { "type": "string", "maxLength": 500 } }
+    }
+  ]
+}
