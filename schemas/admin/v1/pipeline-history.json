@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/admin/v1/pipeline-history.json",
+  "title": "PipelineHistory",
+  "description": "Respuesta de GET /admin/pipeline/history?phase=&since=&limit=. Retención: lista Redis acotada a 1000 eventos (los más recientes); limit por defecto 100, máximo 500; orden más reciente primero. Tipos: TRANSITION (cambio de estado de transporte de una fase), HUMAN_VERIFIED, HUMAN_REVOKED. Parámetros inválidos → 400 VALIDATION_ERROR; sin Redis → 503 REDIS_UNAVAILABLE.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["events", "limit", "retention_max_events"],
+  "properties": {
+    "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+    "retention_max_events": { "type": "integer", "const": 1000 },
+    "events": { "type": "array", "items": { "$ref": "#/$defs/event" } }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "phase", "at"],
+      "properties": {
+        "type": { "type": "string", "enum": ["TRANSITION", "HUMAN_VERIFIED", "HUMAN_REVOKED"] },
+        "phase": { "type": "string", "enum": ["ingest", "relay", "player"] },
+        "at": { "type": "string", "format": "date-time", "description": "Reloj del servidor." },
+        "from_status": { "type": "string", "enum": ["OK", "DEGRADED", "DOWN", "BLOCKED", "UNKNOWN"] },
+        "to_status": { "type": "string", "enum": ["OK", "DEGRADED", "DOWN", "BLOCKED", "UNKNOWN"] },
+        "reason": { "type": "string" },
+        "actor": { "type": "string", "description": "Solo eventos HUMAN_*: email/sub del JWT." },
+        "note": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

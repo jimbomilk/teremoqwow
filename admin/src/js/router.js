@@ -8,8 +8,10 @@ import { loadSecurity }    from './pages/security.js';
 import { loadFlags }       from './pages/flags.js';
 import { loadAudit }       from './pages/audit.js';
 import { loadOverlays }    from './pages/overlays.js';
+import { loadPipeline }    from './pages/pipeline.js';
 
 export const pages = {
+  pipeline:     { title: 'Pipeline',      load: loadPipeline },
   broadcasts:   { title: 'Broadcasts',    load: loadBroadcasts },
   federation:   { title: 'Federación',    load: loadFederation },
   drm:          { title: 'DRM / Rights',  load: loadDRM },

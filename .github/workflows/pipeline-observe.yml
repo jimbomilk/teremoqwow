@@ -1,0 +1,39 @@
+name: Pipeline Observations
+
+# Colector de transporte del pipeline (#214). Solo afirma llegada de datos/HTTP,
+# jamás calidad audiovisual. El colector corre en el host de producción y sus
+# líneas JSON se pipean a la CLI de ingesta dentro de admin-api.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-observe
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect and ingest
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Run collector on prod host and ingest
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: deploy
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            # Contrato: el colector sale != 0 si falla (aun emitiendo 9 UNKNOWN) y la CLI de
+            # ingesta sale 0 incluso con 0 observaciones; por eso se exige "Stored N" con N>=9.
+            log="$(mktemp)"
+            trap 'rm -f "$log"' EXIT
+            /opt/teremoqwow/scripts/pipeline-collector.sh | docker compose -f /opt/teremoqwow/docker-compose.prod.yml exec -T admin-api python /app/pipeline_ingest.py 2>&1 | tee "$log"
+            grep -Eq 'Stored (9|[1-9][0-9]+) observation\(s\)' "$log"
