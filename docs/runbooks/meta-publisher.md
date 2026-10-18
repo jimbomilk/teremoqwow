@@ -40,8 +40,17 @@ Esperado:
 - Puerto HTTP 8090 del relay abierto internamente
 
 Si el relay no está listo:
-- El publisher intenta reconectar con backoff exponencial (1→5 s)
-- Restart policy lo reinicia cada vez que detecta fallo irrecuperable
+- El publisher intenta reconectar con backoff exponencial (1→5 s), hasta
+  `MAX_RECONNECT_ATTEMPTS` intentos consecutivos fallidos (default **30**;
+  no se define en `docker-compose.prod.yml` porque el default ES el valor de
+  producción). Agotados → log `FATAL ... reconnect attempts exhausted` a
+  stderr y `process.exit(1)`; `restart: unless-stopped` reinicia el servicio
+  (boot_id nuevo, seq reinicia a 0 — por contrato).
+- Con el default, 30 intentos × backoff ≤5 s ≈ hasta ~2,5 min sin relay antes
+  del reinicio externo. Una conexión exitosa (publicación iniciada) resetea el
+  contador a 0.
+- Variable configurable solo para tests/diagnóstico: entero > 0; valor
+  ausente o inválido (`0`, `abc`, `-2`, `2.5`) → default 30.
 
 ## Health Check
 
@@ -197,6 +206,9 @@ docker compose -f docker-compose.prod.yml restart meta-publisher
 
 1. **Relay se reinicia:** publisher detecta desconexión, backoff 1→5 s, reconecta solo.
 2. **Publisher se reinicia:** `restart: unless-stopped` lo levanta automáticamente.
+   Si el relay lleva caído más de ~2,5 min (30 intentos agotados), el publisher
+   hace `exit(1)` con log `FATAL` y Docker lo reinicia; el ciclo se repite hasta
+   que el relay vuelve.
 3. **Tiempo esperado:** < 15 s desde evento de fallo hasta primer evento publicado post-recovery.
 
 Verificar post-recovery:

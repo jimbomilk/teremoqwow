@@ -10,6 +10,35 @@ const TRACK = process.env.TRACK || 'heartbeat';
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS || '1000', 10);
 const HEALTH_MARKER_PATH = process.env.HEALTH_MARKER_PATH || '/tmp/meta-publisher-health';
 
+// Enmienda H2 (2026-10-18, contrato #206 opción B): reconexión finita.
+// Intentos consecutivos fallidos de conexión antes de exit(1); Docker
+// (restart: unless-stopped) reinicia el servicio. Default 30 = producción,
+// por eso docker-compose.prod.yml NO añade la env.
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = 30;
+
+/**
+ * Valida MAX_RECONNECT_ATTEMPTS: entero > 0. Ausente o inválida → default 30
+ * (contrato enmienda H2). Acepta number entero finito o string de dígitos
+ * (whitespace tolerado; "0"/"-2"/"abc"/"2.5"/"1e3" → default).
+ * @param {string|number|undefined|null} raw
+ * @returns {number} entero > 0
+ */
+function parseMaxReconnectAttempts(raw) {
+  if (raw === undefined || raw === null || raw === '') {
+    return DEFAULT_MAX_RECONNECT_ATTEMPTS;
+  }
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MAX_RECONNECT_ATTEMPTS;
+  }
+  if (typeof raw !== 'string' || !/^\s*\d+\s*$/.test(raw)) {
+    return DEFAULT_MAX_RECONNECT_ATTEMPTS;
+  }
+  const n = parseInt(raw, 10);
+  return Number.isSafeInteger(n) && n > 0 ? n : DEFAULT_MAX_RECONNECT_ATTEMPTS;
+}
+
+const MAX_RECONNECT_ATTEMPTS = parseMaxReconnectAttempts(process.env.MAX_RECONNECT_ATTEMPTS);
+
 // Guard: reject non-anon/live1-meta broadcasts
 if (BROADCAST !== 'anon/live1-meta') {
   console.error(`ERROR: BROADCAST must be 'anon/live1-meta', got '${BROADCAST}'`);
@@ -85,6 +114,12 @@ function publishHeartbeatAsGroup(track, heartbeat) {
  * @param {object} options.track - Track object (default: created from origin)
  * @param {object} options.timer - Timer instance (default: new DriftCorrectionTimer)
  * @param {number} options.maxPublishes - Max publishes before exit (test only)
+ * @param {number} options.maxReconnectAttempts - Consecutive failed reconnect
+ *   attempts before exit(1) (default: MAX_RECONNECT_ATTEMPTS from env, 30)
+ * @param {Function} options.sleep - Sleep function for backoff waits
+ *   (default: real setTimeout promise; injectable for tests)
+ * @param {Function} options.exit - Exit function on fatal errors
+ *   (default: process.exit; injectable for tests)
  */
 async function publishHeartbeats(options = {}) {
   // Defaults for production CLI
@@ -94,6 +129,9 @@ async function publishHeartbeats(options = {}) {
     track = null, // Will be created if not provided
     timer = null, // Will be created if not provided
     maxPublishes = Infinity, // Test limit
+    maxReconnectAttempts = MAX_RECONNECT_ATTEMPTS, // Enmienda H2: finite reconnect
+    sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+    exit = (code) => process.exit(code),
   } = options;
 
   console.error(`[Publisher] Connecting to ${MOQ_URL}`);
@@ -104,6 +142,7 @@ async function publishHeartbeats(options = {}) {
   const bootId = generateBootId();
   let seq = 0;
   let reconnectBackoff = 1000; // ms
+  let reconnectAttempts = 0; // Enmienda H2: intentos consecutivos fallidos
   let totalPublished = 0;
 
   while (totalPublished < maxPublishes) {
@@ -185,6 +224,9 @@ async function publishHeartbeats(options = {}) {
             // FIX #206: Usar appendGroup() + writeJson() + close() en lugar de Stream.Producer
             publishHeartbeatAsGroup(publishTrack, heartbeat);
             totalPublished++;
+            // Enmienda H2: publicación iniciada con éxito → reset del contador
+            // de intentos consecutivos fallidos de reconexión.
+            reconnectAttempts = 0;
 
             updateHealthMarker();
 
@@ -231,20 +273,52 @@ async function publishHeartbeats(options = {}) {
 
       // Connection lost, close and reconnect
       try { connection.close(); } catch (e) { /* ignore */ }
+
+      // Enmienda H2 (contrato #206, opción B): reconexión finita
+      reconnectAttempts++;
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        console.error(
+          `[Publisher] FATAL: ${reconnectAttempts}/${maxReconnectAttempts} ` +
+          `reconnect attempts exhausted (MAX_RECONNECT_ATTEMPTS=${maxReconnectAttempts}); exiting for restart`
+        );
+        exit(1);
+        return;
+      }
+
       reconnectBackoff = Math.min(reconnectBackoff * 1.5, 5000);
       console.error(`[Publisher] Reconnecting in ${reconnectBackoff}ms...`);
-      await new Promise(resolve => setTimeout(resolve, reconnectBackoff));
+      await sleep(reconnectBackoff);
     } catch (err) {
       console.error(`[Publisher] Connection error: ${err.message}`);
+
+      // Enmienda H2 (contrato #206, opción B): reconexión finita
+      reconnectAttempts++;
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        console.error(
+          `[Publisher] FATAL: ${reconnectAttempts}/${maxReconnectAttempts} ` +
+          `reconnect attempts exhausted (MAX_RECONNECT_ATTEMPTS=${maxReconnectAttempts}); exiting for restart`
+        );
+        exit(1);
+        return;
+      }
 
       // Exponential backoff with cap at 5s
       reconnectBackoff = Math.min(reconnectBackoff * 1.5, 5000);
       console.error(`[Publisher] Reconnecting in ${reconnectBackoff}ms...`);
 
-      await new Promise(resolve => setTimeout(resolve, reconnectBackoff));
+      await sleep(reconnectBackoff);
     }
   }
 }
 
 // Export for testing
-export { publishHeartbeats, generateBootId, DriftCorrectionTimer, updateHealthMarker, publishHeartbeatAsGroup };
+export {
+  publishHeartbeats,
+  generateBootId,
+  DriftCorrectionTimer,
+  updateHealthMarker,
+  publishHeartbeatAsGroup,
+  parseMaxReconnectAttempts,
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  MAX_RECONNECT_ATTEMPTS,
+};
