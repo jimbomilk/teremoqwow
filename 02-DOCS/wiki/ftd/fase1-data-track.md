@@ -43,6 +43,20 @@ La máquina afirma únicamente llegada de datos/transporte; nunca calidad audiov
     intentos y el proceso sale !=0 (no hang infinito). En producción, 30 intentos
     × backoff ≤5 s ≈ hasta ~2,5 min sin relay antes de reinicio externo —
     coherente con `restart: unless-stopped`.
+    - **Corrección 2026-10-18 (MEDIUM-1 de ambos refuters):** la frase anterior
+      decía "éxito al conectar resetea el contador". La semántica correcta y
+      testeable es **éxito al iniciar publicación (primer frame escrito)**, no al
+      conectar. Con reset-on-connect literal el contador nunca alcanzaría el
+      máximo en un relay con *flapping* (conecta y cierra antes del primer frame),
+      el bucle volvería a ser infinito y la mutación H2 sería otra vez
+      no-testeable. El código (`publisher.mjs`, reset tras `publishHeartbeatAsGroup`
+      exitoso) ya implementa esta lectura; queda fijada aquí para que ningún
+      cambio futuro "corrija" el código hacia la lectura literal.
+    - **Alcance de "intentos consecutivos fallidos" (HIGH-1 de refuter-tests):**
+      cuenta **ambos** caminos de fallo — conexión perdida durante la publicación
+      y error de `connect()` (relay caído/`ECONNREFUSED` al arrancar). Los dos
+      deben agotar el contador y terminar en `exit(1)`; ningún camino puede
+      buclear indefinidamente.
 - Health: el publicador escribe marca temporal tras cada frame escrito; healthcheck
   Docker falla si la marca tiene >5 s.
 - Observación: modo `observe --window 20` suscribe `heartbeat` durante la ventana y
