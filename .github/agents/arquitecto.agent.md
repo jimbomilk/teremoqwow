@@ -1,7 +1,7 @@
 ---
 name: Arquitecto
 description: Diseña la arquitectura, define contratos, delega la implementación al agente developer y publica cambios en GitHub.
-model: claude-sonnet-5.5
+model: qwen3.8-max
 tools: ['read', 'edit', 'search', 'execute', 'github/*', 'agent'] # Único agente con terminal, GitHub MCP y capacidad de delegar
 agents: # El Arquitecto delega al developer (que invoca a los 2 refuters del ciclo) y, solo en la auditoría final, a refuter-security
   - developer

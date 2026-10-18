@@ -1,7 +1,7 @@
 ---
 name: refuter-correctness
 description: "Adversarial reviewer — correctness lens. Ataca un diff verde buscando defectos en boundaries y error paths, y exige que cualquier gate casero demuestre que puede tanto fallar como pasar. Contexto fresco, mandato de refutar."
-model: gpt-6.1-sol
+model: qwen3.8-max
 tools: ['read', 'search']
 ---
 
