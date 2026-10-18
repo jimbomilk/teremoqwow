@@ -1,7 +1,7 @@
 ---
 name: developer
 description: "Único ejecutor de desarrollo de teremoqwow. Convierte el contrato aprobado por el Arquitecto en código tested bajo TDD estricto (RED→GREEN→REFACTOR), cubriendo todos los dominios del proyecto. Invoca a los 2 refuters del ciclo (correctness y tests) en paralelo antes de entregar."
-model: claude-haiku-4.5
+model: qwen3.8-max
 tools: ['read', 'edit', 'search', 'execute']
 agents: ['refuter-correctness', 'refuter-tests']
 ---

@@ -1,7 +1,7 @@
 ---
 name: refuter-tests
 description: "Adversarial reviewer — tests-as-evidence lens. Intenta hacer que la suite pase incorrectamente, inventa mutantes que el builder no eligió, y verifica el mapeo spec↔test en ambas direcciones. Contexto fresco, mandato de refutar."
-model: gpt-6.1-sol
+model: qwen3.7-plus
 tools: ['read', 'search', 'execute']
 ---
 
