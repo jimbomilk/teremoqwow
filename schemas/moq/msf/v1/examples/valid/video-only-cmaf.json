@@ -1,0 +1,22 @@
+{
+  "version": "draft-01",
+  "generatedAt": 1790000000000,
+  "tracks": [
+    {
+      "namespace": "anon/match-1",
+      "name": "0.avc3",
+      "role": "video",
+      "codec": "avc3.42c01e",
+      "packaging": "x-teremoqwow-hang",
+      "timescale": 1000000,
+      "isLive": true,
+      "bitrate": 2500000,
+      "width": 1280,
+      "height": 720,
+      "framerate": 25,
+      "teremoqwow": {
+        "container": "cmaf"
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/moq/msf/v1/track.json",
+  "title": "MsfTrack",
+  "description": "Objeto track de un catálogo MSF (draft-ietf-moq-msf-01, sección 5.2), subconjunto de catálogo independiente (sin campos exclusivos de deltaUpdate/clone). Genérico: no impone el perfil teremoqwow (ver teremoqwow-profile.json). 'packaging' admite los valores estándar de la Tabla 3 del draft y valores de extensión con prefijo 'x-'; un valor 'x-*' NO es conforme a la Tabla 3 y sólo lo entienden consumidores que conozcan la extensión. Campos de extensión propios, únicamente dentro de 'teremoqwow'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "packaging", "isLive"],
+  "properties": {
+    "namespace": { "type": "string", "minLength": 1, "description": "5.2.2. Opcional en MSF (hereda del track catalog); el perfil teremoqwow lo exige." },
+    "name": { "type": "string", "minLength": 1, "description": "5.2.3. Único por namespace dentro del catálogo (JSON Schema no puede forzarlo; lo comprueba el consumidor/productor)." },
+    "packaging": {
+      "type": "string",
+      "anyOf": [
+        { "enum": ["loc", "mediatimeline", "eventtimeline", "moqlog", "moqmetrics"] },
+        { "pattern": "^x-[a-z0-9][a-z0-9-]*$" }
+      ],
+      "description": "5.2.4. Valores estándar de la Tabla 3 o extensión 'x-*'."
+    },
+    "eventType": { "type": "string", "minLength": 1, "description": "5.2.5. Obligatorio si packaging=eventtimeline; prohibido en otro caso." },
+    "isLive": { "type": "boolean", "description": "5.2.7." },
+    "targetLatency": { "type": "integer", "minimum": 0, "description": "5.2.8. Excluyente con 'buffers'." },
+    "buffers": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "target": { "type": "integer", "minimum": 0 },
+        "min": { "type": "integer", "minimum": 0 }
+      },
+      "description": "5.2.9. Excluyente con 'targetLatency'."
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1,
+      "description": "5.2.6. Roles reservados (video, audio, mediatimeline, eventtimeline, caption, subtitle, signlanguage, audiodescription, log, metrics) o rol propio sin colisión."
+    },
+    "label": { "type": "string" },
+    "renderGroup": { "type": "integer", "minimum": 0 },
+    "altGroup": { "type": "integer", "minimum": 0 },
+    "initRef": { "type": "string" },
+    "depends": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "temporalId": { "type": "integer", "minimum": 0 },
+    "spatialId": { "type": "integer", "minimum": 0 },
+    "codec": { "type": "string", "minLength": 1, "description": "5.2.18. Obligatorio para audio/vídeo; omitido en tracks de datos/eventos." },
+    "mimeType": { "type": "string", "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$", "description": "5.2.19." },
+    "framerate": { "type": "number", "exclusiveMinimum": 0 },
+    "timescale": { "type": "integer", "minimum": 1, "description": "5.2.21. Unidades de tiempo por segundo." },
+    "bitrate": { "type": "integer", "minimum": 0, "description": "5.2.22. bits/s máximo; MUST en audio y vídeo." },
+    "avgBitrate": { "type": "integer", "minimum": 0 },
+    "maxGopDuration": { "type": "integer", "minimum": 0 },
+    "maxGroupDuration": { "type": "integer", "minimum": 0 },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "samplerate": { "type": "integer", "minimum": 1, "description": "5.2.28." },
+    "channelConfig": { "type": "string", "minLength": 1, "description": "5.2.29." },
+    "displayWidth": { "type": "integer", "minimum": 1 },
+    "displayHeight": { "type": "integer", "minimum": 1 },
+    "lang": { "type": "string", "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]+)*$" },
+    "trackDuration": { "type": "integer", "minimum": 0, "description": "5.2.35. No puede aparecer si isLive=true." },
+    "teremoqwow": { "$ref": "https://teremoqwow.dev/schemas/moq/msf/v1/teremoqwow-extension.json" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "packaging": { "const": "eventtimeline" } }, "required": ["packaging"] },
+      "then": { "required": ["eventType"] },
+      "else": { "not": { "required": ["eventType"] } }
+    },
+    { "not": { "required": ["targetLatency", "buffers"] } },
+    {
+      "if": { "properties": { "isLive": { "const": true } }, "required": ["isLive"] },
+      "then": { "not": { "required": ["trackDuration"] } }
+    },
+    {
+      "if": { "properties": { "role": { "enum": ["video", "audio"] } }, "required": ["role"] },
+      "then": { "required": ["codec", "bitrate"] }
+    },
+    {
+      "if": { "properties": { "role": { "const": "audio" } }, "required": ["role"] },
+      "then": { "required": ["samplerate", "channelConfig"] }
+    }
+  ]
+}

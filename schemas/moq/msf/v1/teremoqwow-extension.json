@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/moq/msf/v1/teremoqwow-extension.json",
+  "title": "TeremoqwowTrackExtension",
+  "description": "Extensión propia (no parte de MSF) que cuelga de la clave 'teremoqwow' de un track. Describe honestamente lo que el stack actual publica: (a) tracks de media en contenedor Hang ('container': legacy = varint-timestamp + bitstream crudo, cmaf = fMP4), que NO es LOC; (b) el track de telemetría, donde cada objeto MoQ es un snapshot JSON completo y autocontenido (representation = 'json-snapshot-v1'): un documento UTF-8 que valida contra 'schema' (telemetry-track-event.json), sin deltas ni dependencia de objetos previos.",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "container": {
+      "type": "string",
+      "enum": ["legacy", "cmaf"],
+      "description": "Contenedor Hang del track de media (mismo vocabulario que schemas/media/v2/catalog.json $defs/container)."
+    },
+    "representation": {
+      "type": "string",
+      "const": "json-snapshot-v1",
+      "description": "Representación del payload de un track JSON."
+    },
+    "schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "$id del JSON Schema que valida cada objeto del track."
+    }
+  }
+}

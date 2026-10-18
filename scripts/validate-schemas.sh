@@ -7,7 +7,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 shopt -s globstar nullglob
-schemas=(schemas/**/*.json)
+all_json=(schemas/**/*.json)
+schemas=()
+for f in "${all_json[@]}"; do
+  # Los ficheros bajo examples/ son instancias (válidas/inválidas), no schemas.
+  case "$f" in */examples/*) continue ;; esac
+  schemas+=("$f")
+done
 
 if [ ${#schemas[@]} -eq 0 ]; then
   echo "No schemas found under schemas/**/*.json"
