@@ -73,9 +73,11 @@ La máquina afirma únicamente llegada de datos/transporte; nunca calidad audiov
 - [x] Cron de `pipeline-observe` offset (#220) — runs schedule ya se disparan; prod host caído (2026-10-18), sin runs verdes aún
 - [x] Tests RED→GREEN (contrato, seq/cadencia, reconexión, propiedad, clasificación) — 85 tests meta-track + 53 tests pipeline verificados por el Arquitecto (2026-10-18)
 - [x] Decisión H2 del Arquitecto: **opción B** (reconexión finita `MAX_RECONNECT_ATTEMPTS=30`, exit(1)) — enmienda al contrato arriba
-- [ ] Implementar enmienda H2 (developer, TDD) + test de mutación H2 determinista
-- [ ] Refuters correctness + tests reales (subagentes) sin HIGH/CRITICAL
-- [ ] PR + deploy + soak 30 min + recovery + snapshot Pipeline — **bloqueado: host prod no responde (22/80/443/4443/4444/8090/9997 filtrados, ping 100% pérdida, 2026-10-18)**
+- [x] Implementar enmienda H2 (developer, TDD) + test de mutación H2 determinista — `f5b3c61`, suite 91/91
+- [x] Refuters correctness + tests reales (subagentes) sin HIGH/CRITICAL — correctness: APPROVE (2 MEDIUM no bloqueantes); tests: HIGH-1 (camino error-de-connect sin cobertura, mutantes A5/A7 supervivientes) → corregido con escenario `connectfail` (`5a244b7`); **Arquitecto verificó empíricamente que A5 y A7 mueren** (pass 6/fail 1, timeout 5 s) y suite final 92/92 → HIGH cerrado sin nueva ronda (regla del flujo: HIGH de cobertura con mutantes reproducibles). MEDIUM-1 de spec corregido en `35790cd`.
+- [x] Fix CI: ruta absoluta hardcodeada en `test-publisher-promise-race-real.mjs` → relativa (`7084574`); job `tests-meta-track` verde en Actions (36 s)
+- [x] Host prod restaurado (2026-10-18 ~20:30 UTC); dispatch manual del colector → **Stored 9 observation(s)**, run `39163902160` success
+- [ ] PR #222 mergeado + deploy + soak 30 min + recovery + snapshot Pipeline
 
 ## Evidence
 
