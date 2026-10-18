@@ -10,7 +10,11 @@
 import * as Moq from '@moq/net';
 import { Stream } from '@moq/json';
 import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import assert from 'assert';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Mock connection that simulates .closed being triggered
@@ -124,7 +128,7 @@ async function testPublisherUsesPromiseRaceForConnectionClosed() {
  */
 function testPublisherSourceContainsPromiseRace() {
   const source = readFileSync(
-    '/home/jimbomilk/projects/teremoqwow/ingest/meta-track/src/publisher.mjs',
+    join(__dirname, '..', 'src', 'publisher.mjs'),
     'utf-8'
   );
 
