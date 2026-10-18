@@ -1,0 +1,63 @@
+# Refuter Entry Points for Task #206
+
+## Execution Environment
+- Repo: jimbomilk/teremoqwow
+- Current HEAD: 0ffdd05531c6de0a263b09754cb6e78444884f06
+- Status: Suite 86/86 PASS (Node), 40/40 PASS (Python), whitespace clean
+
+## Modified Files (git diff HEAD)
+- ingest/meta-track/src/publisher.mjs
+- ingest/meta-track/src/observer.mjs
+- scripts/pipeline-collector.sh
+- scripts/pipeline_obs.py
+- scripts/pipeline-meta-observe.py (new)
+- scripts/test_pipeline_collector.py
+- ingest/meta-track/tests/ (41 new test files)
+
+## Contract (Task Scope)
+File: 02-DOCS/wiki/ftd/fase1-data-track.md
+Key constraints:
+- Publisher: one MoQ group per heartbeat event, JSON {v, boot_id, seq, emitted_at, source_id}
+- seq must be strictly monotonic per boot_id
+- connection.closed must be detected and not result in writes to closed connection
+- Observer: emits {connected, objects, bytes, first_seq, last_seq, boot_ids, monotonic}
+- monotonic must detect non-increasing sequences (duplicates OR decreases)
+- closure must result in connected:false
+
+## Test Entry Point (Node)
+Command: timeout 60 npm test --prefix ingest/meta-track
+Output: 86 PASS, 0 FAIL
+Key tests:
+- H1: test-publisher-seq-increment.mjs (captures seq [0,1,2,3,4])
+- H2: test-publisher-h2-close-before-write.mjs (verifies maxPublishes=1 exactly)
+- H3: test-observer-h3-decreasing.mjs (verifies monotonic:false on [0,2,1,3,4])
+- H3: test-observer-h3-monotonic.mjs (verifies monotonic:false on [0,1,1,2])
+
+## Test Entry Point (Python)
+Command: python3 -m pytest -q scripts/test_pipeline_collector.py scripts/test_pipeline_meta_observe.py
+Output: 40 PASS, 0 FAIL
+
+## Critical Mutations to Detect (per refuter findings)
+1. H1: seq:seq++ → seq:0 (in publishHeartbeatAsGroup loop)
+2. H2: if (false && closedState) → disable closedState guard (line 168)
+3. H3a: seqs[i] <= seqs[i-1] → seqs[i] === seqs[i-1] (misses decreases)
+3. H3b: connected:true → connected:false (always) or monotonic:true → monotonic:false (always)
+
+## Entry Points for Correctness Refuter
+- Source: ingest/meta-track/src/publisher.mjs
+  - verify seq increment in loop (line ~179)
+  - verify dual connection.closed guards (lines 139, 147-150, 168)
+  - verify connection.close() on maxPublishes (line 228)
+  - verify no writes after closedState detected
+- Source: ingest/meta-track/src/observer.mjs
+  - verify trackClosedPromise included in race (line 85)
+  - verify monotonic check catches both duplicates AND decreases (line ~287)
+  - verify connected field set correctly in success vs error paths
+  - verify deadline calculation (lines 189-192)
+
+## Entry Points for Tests Refuter
+- Verify H1 mutation kills: seq [0,1,2,3,4] must be captured from REAL publishHeartbeats call
+- Verify H2 mutation kills: closedState guard must be actually checked in write path
+- Verify H3 mutations kill: observer must emit result with correct monotonic:false + connected value
+- Verify all tests call actual production functions, not helpers or source strings
+

@@ -1,0 +1,68 @@
+=== REFUTER CONTEXT FOR TASK #206: FINAL VERIFICATION ===
+
+TASK: Implement MoQ group-per-event meta-track with proper closure handling
+CONTRACT: 02-DOCS/wiki/ftd/fase1-data-track.md + developer's implementation
+
+PREVIOUS REFUTER FINDINGS:
+================
+HIGH #1 (Correctness, prior round): 
+  "Publisher connection.closed checks can be disabled, tests still pass"
+  FIX: Added connection.close() on maxPublishes (line 228 publisher.mjs)
+  VERIFIED BY: test-publisher-real-loop.mjs + test-publisher-maxpublishes-close.mjs
+
+HIGH #2 (Correctness, prior round):
+  "Observer emits connected:true despite closure if internal race doesn't include trackClosedSignal"
+  FIX: Added trackClosedPromise to Promise.race() in readJsonAcrossGroups (line 296 observer.mjs)
+  VERIFIED BY: test-observer-connected-false.mjs + test-observe-track-closure-real.mjs
+
+HIGH #3 (Correctness, prior round):
+  "External collector timeout equals --window, startup latency can cause premature SIGINT"
+  FIX: Added STARTUP_BUFFER=3 and EXTERNAL_TIMEOUT = WINDOW + STARTUP_BUFFER (lines 49, 65 pipeline-collector.sh)
+  VERIFIED BY: scripts/test-pipeline-timeout.sh
+
+MEDIUM (Correctness, prior round):
+  "connectTimeout outside internal deadline despite AbortSignal support"
+  STATUS: Implemented connectController + AbortSignal (lines 189-191 observer.mjs)
+  JUSTIFICATION: Observer connects BEFORE deadline window (cli entry point)
+
+=== CURRENT STATE FOR REVALIDATION ===
+
+FILES MODIFIED (task-scoped only):
+  1. ingest/meta-track/src/publisher.mjs (line 228: connection.close() on maxPublishes)
+  2. ingest/meta-track/src/observer.mjs (multiple: injection seams, deadline fixes, closure race)
+  3. scripts/pipeline-collector.sh (lines 49, 65: STARTUP_BUFFER + EXTERNAL_TIMEOUT calc)
+
+FILES CREATED (test+validation only, no source logic):
+  - ingest/meta-track/tests/test-*.mjs (81 tests, 35 new files)
+  - scripts/test-pipeline-timeout.sh (shell test for FIX #3)
+
+TEST BASELINE: 81 PASS / 0 FAIL
+  - Publisher: appendGroup→writeJson→close sequence verified
+  - Observer: connected:false on closure verified
+  - Shell: EXTERNAL_TIMEOUT calculation order verified
+
+GIT DIFF CHECKS:
+  ✓ Whitespace: git diff --check passes
+  ✓ Scope: Only meta-track + scripts/pipeline-collector.sh touched
+  ✗ Schemas: NOT modified (per contract)
+  ✓ Commits: None staged
+
+ENTRY POINTS FOR REFUTERS:
+  Node tests: cd ingest/meta-track && node --test tests/test-*.mjs
+  Shell test: bash scripts/test-pipeline-timeout.sh
+  Python: (N/A, Python tests are demo only)
+
+MUTATION TARGETS (should fail if fixed):
+  1. Publisher: if(false) appendGroup() → test-publisher-heartbeat-groups.mjs
+  2. Publisher: skip connection.close() → test-publisher-maxpublishes-close.mjs
+  3. Observer: skip trackClosedPromise in race → test-observer-connected-false.mjs
+  4. Collector: EXTERNAL_TIMEOUT before WINDOW override → test-pipeline-timeout.sh
+
+KNOWN LIMITATIONS:
+  - publishHeartbeats() full loop cannot be tested end-to-end without real moq-relay
+    (reconnection logic requires actual connection failure/recovery)
+  - Observer observeTrack() can be tested with mock connection but output JSON
+    assertion requires real heartbeat data (now verified via test-observe-track-closure-real.mjs)
+
+READY FOR: Refuter-correctness (static analysis + test coverage)
+           Refuter-tests (mutation testing against 81-test baseline)

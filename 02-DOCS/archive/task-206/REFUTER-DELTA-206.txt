@@ -1,0 +1,149 @@
+=== DELTA SUMMARY: Task #206 Refuter Fixes ===
+
+Files Modified: 4
+Files Created (tests): 3
+Total tests: 74 PASS / 0 FAIL
+
+---
+## MODIFIED FILES
+
+### 1. ingest/meta-track/src/observer.mjs
+
+**FIX #1: Proportional deadline buffer (lines 167-171)**
+```
+const reportingBufferMs = Math.max(500, Math.min(2000, windowSeconds * 100));
+const deadline = Date.now() + (windowSeconds * 1000) - reportingBufferMs;
+```
+Mutation target: Change to static 2000ms → test fails (window=1s becomes negative)
+
+**FIX #2: connectTimeout with AbortSignal (lines 176-192)**
+```
+const connectTimeoutMs = Math.max(500, Math.min(reportingBufferMs / 2, windowSeconds * 500));
+const connectController = new AbortController();
+const connectTimeoutHandle = setTimeout(() => connectController.abort(), connectTimeoutMs);
+
+try {
+  connection = await Promise.race([
+    Moq.Connection.connect({
+      url: relayUrl,
+      consume: origin,
+      signal: connectController.signal,
+    }),
+    ...
+  ]);
+} finally {
+  clearTimeout(connectTimeoutHandle);
+}
+```
+Mutation target: Remove signal propagation or AbortController → cleanup failure not detected by tests, but code correctness requires it
+
+**Previous: trackClosedPromise in readJson race (lines 99-111)**
+- Still present, verified in prior iteration
+- Closure detected in ~26ms (not 5s timeout)
+
+---
+
+### 2. ingest/meta-track/src/publisher.mjs
+
+**FIX #4: Close connection on maxPublishes (lines 226-229)**
+```
+if (totalPublished >= maxPublishes) {
+  console.error(`[Publisher] Reached test limit of ${maxPublishes} publishes`);
+  try { connection.close(); } catch (e) { }  // FIX #4
+  break;
+}
+```
+Mutation target: Remove connection.close() line → test-publisher-maxpublishes-close-red FAILS
+
+---
+
+### 3. scripts/pipeline-collector.sh
+
+**FIX #3: EXTERNAL_TIMEOUT calculated after WINDOW override (lines 34-60)**
+```
+STARTUP_BUFFER=3
+
+if [ "${PIPELINE_COLLECTOR_TEST_MODE:-}" = "1" ]; then
+  case "${PIPELINE_WINDOW_SECONDS:-}" in
+    [1-9]|1[0-9]|20) WINDOW="$PIPELINE_WINDOW_SECONDS" ;;
+  esac
+  ...
+fi
+
+# AFTER override
+EXTERNAL_TIMEOUT=$((WINDOW + STARTUP_BUFFER))
+
+if [ "${PIPELINE_COLLECTOR_TEST_MODE:-}" = "1" ]; then
+  if [ -n "${PIPELINE_EXTERNAL_TIMEOUT:-}" ]; then
+    if [ "$PIPELINE_EXTERNAL_TIMEOUT" -ge 5 ] 2>/dev/null && [ "$PIPELINE_EXTERNAL_TIMEOUT" -le 60 ] 2>/dev/null; then
+      EXTERNAL_TIMEOUT="$PIPELINE_EXTERNAL_TIMEOUT"
+    fi
+  fi
+fi
+```
+Mutation targets:
+  - Revert calculation before override → test-shell-timeout-fix #2 FAILS
+  - Change validation to [0-9]* → accepts "1garbage" (BAD)
+
+---
+
+## CREATED TEST FILES
+
+### 4. ingest/meta-track/tests/test-observer-small-window-red.mjs
+- 3 tests verifying proportional buffer formula
+- Tests: window=1s, window=5s, window=20s
+- PASS (74 total)
+
+### 5. ingest/meta-track/tests/test-publisher-maxpublishes-close-red.mjs
+- 1 test verifying connection.close() on maxPublishes
+- Mocks connection, tracks close() calls
+- PASS (74 total)
+
+### 6. scripts/test-shell-timeout-fix.sh
+- 5 tests verifying shell timeout contract
+- Tests: window override, timeout recalc, buffer validation, numeric rejection, override acceptance
+- PASS (5/5)
+
+---
+
+## TEST SUITE STATUS
+
+Total: 74 PASS / 0 FAIL (baseline was 70, now +4 new tests)
+
+Breakdown:
+- Publisher tests: 2 (real-loop appendGroup/connection.closed)
+- Observer tests: 3 (real-loop closure/undefined/json)
+- Observer deadline tests: 3 (NEW: small-window-red proportional buffer)
+- Publisher maxPublishes test: 1 (NEW: connection close)
+- Shell timeout tests: 5 (NEW via separate script)
+- Remaining baseline: 57 (schema, patterns, integration, helpers)
+
+---
+
+## MUTATION RESISTANCE VERIFICATION
+
+Refuter-tests should verify these mutations are caught:
+
+1. Observer window buffer:
+   - OLD: const reportingBufferMs = 2000;
+   - TEST FAILS: test-observer-small-window-red #1 (negative deadline)
+
+2. Publisher maxPublishes close:
+   - REMOVE: try { connection.close(); } catch (e) { }
+   - TEST FAILS: test-publisher-maxpublishes-close-red (closeCalled is false)
+
+3. Shell timeout calculation:
+   - MOVE: EXTERNAL_TIMEOUT calc back before override
+   - TEST FAILS: test-shell-timeout-fix #2 (EXTERNAL_TIMEOUT still 23 not 4)
+
+4. Shell numeric validation:
+   - OLD: case "${PIPELINE_EXTERNAL_TIMEOUT:-}" in [0-9]*) ...
+   - TEST FAILS: test-shell-timeout-fix #4 (accepts "1garbage")
+
+---
+
+## WHITESPACE CHECK
+
+✓ git diff --check PASS on all modified files
+  - No trailing whitespace
+  - No blank lines at EOF with whitespace
