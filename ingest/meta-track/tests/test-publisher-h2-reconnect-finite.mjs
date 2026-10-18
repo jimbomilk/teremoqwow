@@ -37,6 +37,10 @@
  *   - exit(0)/exit sin código en vez de exit(1) → falla assert de código.
  *   - parseMaxReconnectAttempts tolerante ("0"/"abc"/"-2" → otro valor) →
  *     fallan los asserts de contrato de env.
+ *   - FIX HIGH-1 (ronda refuters): eliminar `reconnectAttempts++` del catch
+ *     externo de connect-error (mutante A5) o añadir `reconnectAttempts = 0`
+ *     en ese catch (mutante A7) → el publisher bucla para siempre con el
+ *     relay caído → falla escenario 'connectfail' (timeout → FAIL).
  */
 
 import { test } from 'node:test';
@@ -87,7 +91,10 @@ function runScenario(scenario, extraEnv = {}) {
       child.kill('SIGKILL');
     }, CHILD_TIMEOUT_MS);
 
-    child.on('exit', (code, signal) => {
+    // LOW-1 (refuter-correctness): 'close' en vez de 'exit' — garantiza que
+    // los pipes de stdout/stderr están drenados antes de resolver (sin
+    // falsos rojos por datos pendientes cuando el hijo hace process.exit(1)).
+    child.on('close', (code, signal) => {
       clearTimeout(killer);
       resolve({ code, signal, events, stderr: stderrBuf, timedOut });
     });
@@ -201,6 +208,8 @@ test('H2 guard mutation: cerrar conexión durante la espera del timer ejercita e
   assert.equal(r.code, 1, `guard intacto → agota intentos → exit(1); code=${r.code}`);
   assert.ok(!r.events.includes('returned-normally'), 'guard mutado retornaría normalmente');
   assert.equal(count(r.events, 'connect'), 2, '2 intentos consecutivos fallidos');
+  // LOW-2 (refuter-correctness): afirmar también el log FATAL en guard
+  assert.match(r.stderr, /FATAL/, 'log FATAL presente al agotar intentos');
 });
 
 // ── Escenario reset: conexión exitosa (publicación iniciada) resetea ──────
@@ -239,4 +248,49 @@ test('H2 backoff: el agotamiento respeta el backoff existente 1s→5s (secuencia
   const reconnectLines = r.stderr.split('\n').filter((l) => l.includes('Reconnecting in'));
   assert.ok(reconnectLines.length >= 2, 'debe loggear Reconnecting in ...ms (backoff intacto)');
   assert.match(reconnectLines[0], /1500ms/, 'primer backoff = 1500ms (1000 * 1.5, igual que antes)');
+});
+
+// ── FIX HIGH-1: escenario connectfail — camino de error de connect() ──────
+
+test('H2 connectfail (FIX HIGH-1): connect() que lanza SIEMPRE agota intentos y sale con código 1', async () => {
+  // Contrato enmendado (commit 35790cd): "intentos consecutivos fallidos"
+  // cubre AMBOS caminos — conexión perdida Y error de connect(). Los otros
+  // 4 escenarios fallan siempre vía connection.closed; este ejercita el
+  // catch EXTERNO "Connection error" (reconnectAttempts++ / check / exit(1)).
+  //
+  // MUTANTES QUE MATA (demostrado en la ronda de corrección):
+  //   A5: eliminar `reconnectAttempts++` del catch de connect-error →
+  //       el publisher bucla para siempre con el relay caído → timeout → FAIL.
+  //   A7: añadir `reconnectAttempts = 0;` en ese catch → mismo hang → FAIL.
+  const r = await runScenario('connectfail', { MAX_RECONNECT_ATTEMPTS: '2' });
+
+  assert.ok(
+    !r.timedOut,
+    'con connect() lanzando siempre, el publisher NO debe buclar indefinidamente ' +
+    '(mutantes A5/A7 sobre el catch de connect-error → timeout → FAIL). ' +
+    `Últimos eventos: ${JSON.stringify(r.events.slice(-6))}`
+  );
+  assert.equal(r.code, 1, `debe terminar con process.exit(1); code=${r.code} signal=${r.signal}`);
+  assert.ok(!r.events.includes('returned-normally'), 'no debe retornar normalmente');
+
+  // 2 intentos consecutivos fallidos vía error de connect()
+  assert.equal(count(r.events, 'connect'), 2, 'exactamente 2 intentos de conexión antes de agotar');
+  assert.equal(count(r.events, 'publish'), 0, 'ningún frame publicado (connect nunca tiene éxito)');
+
+  // El catch externo loggea "Connection error" en cada intento (≥2 líneas)
+  const connErrLines = r.stderr.split('\n').filter((l) => l.includes('Connection error'));
+  assert.ok(
+    connErrLines.length >= 2,
+    `debe loggear ≥2 "Connection error" (una por intento); obtenidas ${connErrLines.length}`
+  );
+  assert.match(connErrLines[0], /ECONNREFUSED/, 'el error de connect debe citarse en el log');
+
+  // Log FATAL claro con número de intentos (contrato enmienda)
+  assert.match(r.stderr, /FATAL/, 'debe loggear FATAL a stderr');
+  assert.match(
+    r.stderr,
+    /MAX_RECONNECT_ATTEMPTS/,
+    'el log FATAL debe citar MAX_RECONNECT_ATTEMPTS'
+  );
+  assert.match(r.stderr, /2\/2/, 'el log FATAL debe incluir el número de intentos (2/2)');
 });

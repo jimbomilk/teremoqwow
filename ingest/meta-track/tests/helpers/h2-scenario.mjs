@@ -26,8 +26,16 @@
  *   guard   — como exhaust pero con maxPublishes=3: si el guard closedState
  *             se muta a `if (false && closedState)`, el publisher publicaría
  *             3 frames y saldría con código 0 en vez de exit(1).
+ *   connectfail — FIX HIGH-1 (alcance "intentos consecutivos fallidos",
+ *             contrato #206): connect() LANZA SIEMPRE (Error 'ECONNREFUSED',
+ *             relay caído al arrancar). MAX_RECONNECT_ATTEMPTS=2 vía ENV;
+ *             sleep noop. Ejercita el catch EXTERNO de connect-error
+ *             (reconnectAttempts++ / check / exit(1)) que los otros 4
+ *             escenarios no tocan: todos fallan vía connection.closed.
+ *             Mata los mutantes A5 (eliminar reconnectAttempts++ del catch)
+ *             y A7 (añadir reconnectAttempts = 0 en el catch) → hang.
  *
- * Uso: node tests/helpers/h2-scenario.mjs <exhaust|reset|guard>
+ * Uso: node tests/helpers/h2-scenario.mjs <exhaust|reset|guard|connectfail>
  */
 
 import { writeSync } from 'node:fs';
@@ -49,6 +57,12 @@ const mockConnect = async () => {
   connectCount++;
   waitsThisConnection = 0;
   emit('connect');
+  if (scenario === 'connectfail') {
+    // FIX HIGH-1: relay caído — connect() lanza SIEMPRE. Ejercita el catch
+    // externo "Connection error" de publisher.mjs (reconnectAttempts++ /
+    // check de agotamiento / exit(1)).
+    throw new Error('ECONNREFUSED');
+  }
   return {
     closed: new Promise((resolve) => {
       currentClosedResolve = resolve;
@@ -95,6 +109,10 @@ if (scenario === 'exhaust') {
 } else if (scenario === 'reset' || scenario === 'guard') {
   options.maxReconnectAttempts = 2;
   options.maxPublishes = scenario === 'guard' ? 3 : 100;
+} else if (scenario === 'connectfail') {
+  // FIX HIGH-1: maxReconnectAttempts NO se inyecta (viene del ENV
+  // MAX_RECONNECT_ATTEMPTS=2, igual que exhaust); sleep ya es noop.
+  options.maxPublishes = 100;
 } else {
   writeSync(2, `unknown scenario: ${scenario}\n`);
   process.exit(2);
