@@ -33,6 +33,16 @@ La máquina afirma únicamente llegada de datos/transporte; nunca calidad audiov
 - Reconexión: bucle con backoff 1 s→5 s; si la conexión cae se re-publica sin salir;
   si falla irrecuperablemente sale !=0 y `restart: unless-stopped` reinicia.
   Objetivo de recuperación <15 s tras reinicio del relay o del servicio.
+  - **Enmienda 2026-10-18 (decisión H2, opción B):** el bucle de reconexión es
+    finito — `MAX_RECONNECT_ATTEMPTS` (env, entero >0; default 30) intentos
+    consecutivos fallidos. Agotados, log a stderr y `process.exit(1)`; Docker
+    reinicia el servicio (boot_id nuevo, seq reinicia — ya cubierto por contrato).
+    Éxito al conectar resetea el contador. Esto hace testeable la mutación H2
+    (`if (false && closedState)`) con un test determinista y acotado en el tiempo:
+    cerrar la conexión durante la espera del timer y afirmar que se agotan los
+    intentos y el proceso sale !=0 (no hang infinito). En producción, 30 intentos
+    × backoff ≤5 s ≈ hasta ~2,5 min sin relay antes de reinicio externo —
+    coherente con `restart: unless-stopped`.
 - Health: el publicador escribe marca temporal tras cada frame escrito; healthcheck
   Docker falla si la marca tiene >5 s.
 - Observación: modo `observe --window 20` suscribe `heartbeat` durante la ventana y
@@ -46,10 +56,12 @@ La máquina afirma únicamente llegada de datos/transporte; nunca calidad audiov
 ## Checklist
 
 - [x] Schema `meta-heartbeat.json` + `validate-schemas.sh` OK
-- [x] Cron de `pipeline-observe` offset (#220) — verificación con runs schedule reales pendiente
-- [x] Tests RED→GREEN (contrato, seq/cadencia, reconexión, propiedad, clasificación) — 33 tests meta-track + 7 tests pipeline + 4 integration tests
-- [ ] Refuters correctness + tests sin HIGH/CRITICAL
-- [ ] PR + deploy + soak 30 min + recovery + snapshot Pipeline
+- [x] Cron de `pipeline-observe` offset (#220) — runs schedule ya se disparan; prod host caído (2026-10-18), sin runs verdes aún
+- [x] Tests RED→GREEN (contrato, seq/cadencia, reconexión, propiedad, clasificación) — 85 tests meta-track + 53 tests pipeline verificados por el Arquitecto (2026-10-18)
+- [x] Decisión H2 del Arquitecto: **opción B** (reconexión finita `MAX_RECONNECT_ATTEMPTS=30`, exit(1)) — enmienda al contrato arriba
+- [ ] Implementar enmienda H2 (developer, TDD) + test de mutación H2 determinista
+- [ ] Refuters correctness + tests reales (subagentes) sin HIGH/CRITICAL
+- [ ] PR + deploy + soak 30 min + recovery + snapshot Pipeline — **bloqueado: host prod no responde (22/80/443/4443/4444/8090/9997 filtrados, ping 100% pérdida, 2026-10-18)**
 
 ## Evidence
 
