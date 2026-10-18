@@ -150,6 +150,41 @@ services:
       driver: "json-file"
       options: { max-size: "50m", max-file: "3" }
 
+  # ── Meta-Publisher (Heartbeat Track) ───────────────────────────────────────
+  # Servicio único dueño de anon/live1-meta (track heartbeat, ~1 Hz).
+  # Publica eventos JSON sintéticos para verificar transporte sin A/V.
+  # Fase 1 observa con collector: ingest.data PASS si objetos+monótono en ventana.
+  meta-publisher:
+    build:
+      context: ./ingest/meta-track
+      dockerfile: Dockerfile
+    image: teremoqwow-meta-track:1
+    networks: [teremoqwow-prod]
+    environment:
+      MOQ_URL: http://moq-relay:8090/
+      BROADCAST: anon/live1-meta
+      TRACK: heartbeat
+      INTERVAL_MS: 1000
+      HEALTH_MARKER_PATH: /tmp/meta-publisher-health
+    depends_on:
+      moq-relay:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /tmp/meta-publisher-health ] && [ $(( $(date +%s000) - $(cat /tmp/meta-publisher-health) )) -lt 5000 ] && echo OK || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 1
+      start_period: 5s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "2" }
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: false
+
   # ── KrakenD API Gateway ────────────────────────────────────────────────────
   krakend:
     image: devopsfaith/krakend:2.6

@@ -20,14 +20,15 @@ jobs:
     name: detect-changes
     runs-on: ubuntu-latest
     outputs:
-      auth:     ${{ steps.f.outputs.auth }}
-      billing:  ${{ steps.f.outputs.billing }}
-      portal:   ${{ steps.f.outputs.portal }}
-      registry: ${{ steps.f.outputs.registry }}
-      admin:    ${{ steps.f.outputs.admin }}
-      player:   ${{ steps.f.outputs.player }}
-      infra:    ${{ steps.f.outputs.infra }}
-      config:   ${{ steps.f.outputs.config }}
+      auth:       ${{ steps.f.outputs.auth }}
+      billing:    ${{ steps.f.outputs.billing }}
+      portal:     ${{ steps.f.outputs.portal }}
+      registry:   ${{ steps.f.outputs.registry }}
+      admin:      ${{ steps.f.outputs.admin }}
+      player:     ${{ steps.f.outputs.player }}
+      meta_track: ${{ steps.f.outputs.meta_track }}
+      infra:      ${{ steps.f.outputs.infra }}
+      config:     ${{ steps.f.outputs.config }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,6 +49,14 @@ jobs:
               - 'admin/**'
             player:
               - 'player/**'
+            meta_track:
+              - 'ingest/meta-track/**'
+              - 'scripts/pipeline_meta_observe.py'
+              - 'scripts/pipeline_obs.py'
+              - 'scripts/pipeline-collector.sh'
+              - 'scripts/test_pipeline_meta_observe.py'
+              - 'scripts/test_pipeline_obs_total_bytes.py'
+              - 'docker-compose.prod.yml'
             infra:
               - 'docker-compose.prod.yml'
               - 'config/nginx/**'
@@ -74,6 +83,7 @@ jobs:
           echo "registry=${{ needs.detect.outputs.registry }}"
           echo "admin=${{ needs.detect.outputs.admin }}"
           echo "player=${{ needs.detect.outputs.player }}"
+          echo "meta_track=${{ needs.detect.outputs.meta_track }}"
           echo "infra=${{ needs.detect.outputs.infra }}"
           echo "config=${{ needs.detect.outputs.config }}"
           echo "force_full=${{ github.event.inputs.force_full }}"
@@ -87,7 +97,7 @@ jobs:
           port: 22
           timeout: 600s
           # envs lista las variables de env: que se inyectan en el script SSH
-          envs: CHANGED_AUTH,CHANGED_BILLING,CHANGED_PORTAL,CHANGED_REGISTRY,CHANGED_ADMIN,CHANGED_PLAYER,CHANGED_INFRA,CHANGED_CONFIG,FORCE_FULL
+          envs: CHANGED_AUTH,CHANGED_BILLING,CHANGED_PORTAL,CHANGED_REGISTRY,CHANGED_ADMIN,CHANGED_PLAYER,CHANGED_META_TRACK,CHANGED_INFRA,CHANGED_CONFIG,FORCE_FULL
           script: |
             REPO_DIR=/opt/teremoqwow
             # Guardar FORCE_FULL ANTES del export del .env (que podría pisarla)
@@ -113,17 +123,18 @@ jobs:
 
             if [ "$FORCE_FULL" = "true" ] || [ "$FORCE_FULL" = "1" ] || [ "$FORCE_FULL" = "yes" ]; then
               echo "=== Forzando deploy completo ==="
-              BUILD_SERVICES="auth billing-webhook portal registry-server admin-api admin player"
-              RESTART_SERVICES="redis clickhouse moq-relay srt-ingest source-ffmpeg krakend nginx prometheus grafana"
+              BUILD_SERVICES="auth billing-webhook portal registry-server admin-api admin player meta-publisher"
+              RESTART_SERVICES="redis clickhouse moq-relay srt-ingest source-ffmpeg meta-publisher krakend nginx prometheus grafana"
             else
-              [ "${CHANGED_AUTH:-false}"     = "true" ] && BUILD_SERVICES="$BUILD_SERVICES auth"
-              [ "${CHANGED_BILLING:-false}"  = "true" ] && BUILD_SERVICES="$BUILD_SERVICES billing-webhook"
-              [ "${CHANGED_PORTAL:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES portal"
-              [ "${CHANGED_REGISTRY:-false}" = "true" ] && BUILD_SERVICES="$BUILD_SERVICES registry-server"
-              [ "${CHANGED_ADMIN:-false}"    = "true" ] && BUILD_SERVICES="$BUILD_SERVICES admin-api admin"
-              [ "${CHANGED_PLAYER:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES player"
-              [ "${CHANGED_INFRA:-false}"    = "true" ] && RESTART_SERVICES="$RESTART_SERVICES nginx srt-ingest source-ffmpeg"
-              [ "${CHANGED_CONFIG:-false}"   = "true" ] && RESTART_SERVICES="$RESTART_SERVICES krakend prometheus grafana"
+              [ "${CHANGED_AUTH:-false}"      = "true" ] && BUILD_SERVICES="$BUILD_SERVICES auth"
+              [ "${CHANGED_BILLING:-false}"   = "true" ] && BUILD_SERVICES="$BUILD_SERVICES billing-webhook"
+              [ "${CHANGED_PORTAL:-false}"    = "true" ] && BUILD_SERVICES="$BUILD_SERVICES portal"
+              [ "${CHANGED_REGISTRY:-false}"  = "true" ] && BUILD_SERVICES="$BUILD_SERVICES registry-server"
+              [ "${CHANGED_ADMIN:-false}"     = "true" ] && BUILD_SERVICES="$BUILD_SERVICES admin-api admin"
+              [ "${CHANGED_PLAYER:-false}"    = "true" ] && BUILD_SERVICES="$BUILD_SERVICES player"
+              [ "${CHANGED_META_TRACK:-false}" = "true" ] && BUILD_SERVICES="$BUILD_SERVICES meta-publisher" && RESTART_SERVICES="$RESTART_SERVICES meta-publisher"
+              [ "${CHANGED_INFRA:-false}"     = "true" ] && RESTART_SERVICES="$RESTART_SERVICES nginx srt-ingest source-ffmpeg"
+              [ "${CHANGED_CONFIG:-false}"    = "true" ] && RESTART_SERVICES="$RESTART_SERVICES krakend prometheus grafana"
             fi
 
             BUILD_SERVICES=$(echo $BUILD_SERVICES | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
@@ -148,12 +159,13 @@ jobs:
             $COMPOSE ps
             echo "Deploy $NEW_SHA OK — actualizados: $ALL_RESTART"
         env:
-          CHANGED_AUTH:     ${{ needs.detect.outputs.auth }}
-          CHANGED_BILLING:  ${{ needs.detect.outputs.billing }}
-          CHANGED_PORTAL:   ${{ needs.detect.outputs.portal }}
-          CHANGED_REGISTRY: ${{ needs.detect.outputs.registry }}
-          CHANGED_ADMIN:    ${{ needs.detect.outputs.admin }}
-          CHANGED_PLAYER:   ${{ needs.detect.outputs.player }}
-          CHANGED_INFRA:    ${{ needs.detect.outputs.infra }}
-          CHANGED_CONFIG:   ${{ needs.detect.outputs.config }}
-          FORCE_FULL:       ${{ github.event.inputs.force_full || 'false' }}
+          CHANGED_AUTH:       ${{ needs.detect.outputs.auth }}
+          CHANGED_BILLING:    ${{ needs.detect.outputs.billing }}
+          CHANGED_PORTAL:     ${{ needs.detect.outputs.portal }}
+          CHANGED_REGISTRY:   ${{ needs.detect.outputs.registry }}
+          CHANGED_ADMIN:      ${{ needs.detect.outputs.admin }}
+          CHANGED_PLAYER:     ${{ needs.detect.outputs.player }}
+          CHANGED_META_TRACK: ${{ needs.detect.outputs.meta_track }}
+          CHANGED_INFRA:      ${{ needs.detect.outputs.infra }}
+          CHANGED_CONFIG:     ${{ needs.detect.outputs.config }}
+          FORCE_FULL:         ${{ github.event.inputs.force_full || 'false' }}

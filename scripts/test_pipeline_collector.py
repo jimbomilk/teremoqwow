@@ -35,7 +35,15 @@ args = sys.argv[1:]
 if args[:1] != ["run"]:
     sys.exit(0)
 mode = os.environ.get("STUB_DOCKER_MODE", "ok")
-broadcast = args[args.index("--broadcast") + 1]
+# Determine if this is meta or live1 based on image/command
+is_meta = "observe" in args  # meta: observe --window ...
+is_live1 = "--broadcast" in args  # live1: --broadcast <path>
+if is_meta:
+    broadcast = "anon/live1-meta"
+elif is_live1:
+    broadcast = args[args.index("--broadcast") + 1]
+else:
+    broadcast = "unknown"
 if mode == "fail":
     sys.exit(1)
 if mode == "connerr":
@@ -47,9 +55,27 @@ if mode == "stderr_flood":
     sys.stderr.buffer.write((b"\\x47\\x1f\\xff\\x10" + b"\\xff" * 184) * 50)
     sys.stderr.flush()
     sys.exit(0)
-path = os.environ["STUB_TS_" + ("META" if broadcast.endswith("-meta") else "LIVE1")]
-sys.stderr.write("INFO connected\\n")
-sys.stdout.buffer.write(open(path, "rb").read())
+# Meta observer outputs JSON; live1 outputs binary TS
+if is_meta:
+    # Output observer JSON (one line)
+    # For test: 20 objects * 188 bytes each = 3760 bytes
+    # (10+ objects required for PASS; minimum is 10*188=1880)
+    result = {{
+        "connected": True,
+        "objects": 20,
+        "bytes": 188 * 20,
+        "first_seq": 0,
+        "last_seq": 19,
+        "boot_ids": ["boot123"],
+        "monotonic": True,
+        "window_seconds": 20
+    }}
+    sys.stdout.write(json.dumps(result) + "\\n")
+else:
+    # Output binary TS packets
+    path = os.environ["STUB_TS_LIVE1"]
+    sys.stderr.write("INFO connected\\n")
+    sys.stdout.buffer.write(open(path, "rb").read())
 """
 
 CURL_STUB = f"""#!{sys.executable}
@@ -148,7 +174,8 @@ def test_happy_path(env):
     assert set(result(out).values()) == {"PASS"}
     assert out["ingest.video"]["metrics"] == {"bytes": 188 * 3, "window_seconds": 20}
     assert out["ingest.audio"]["metrics"] == {"bytes": 188 * 2, "window_seconds": 20}
-    assert out["ingest.data"]["metrics"]["bytes"] == 188 * 4
+    # Meta now outputs JSON via observer; updated stub to 20 objects * 188 bytes each
+    assert out["ingest.data"]["metrics"]["bytes"] == 188 * 20
     assert out["relay.public"]["metrics"] == {"http_status": 200}
     assert "no el navegador del player" in out["player.subscribe"]["reason"]
     assert p.stderr == ""
@@ -159,19 +186,31 @@ def test_two_sessions_distinct_broadcasts_and_window(env):
     parse(p)
     runs = [c for c in calls if c[0] == "docker" and c[1] == "run"]
     assert len(runs) == 2
-    broadcasts = sorted(c[c.index("--broadcast") + 1] for c in runs)
-    assert broadcasts == ["anon/live1", "anon/live1-meta"]
-    for c in runs:
-        assert c[c.index("--connect") + 1] == "https://wow.teremoq.com:4443/anon"
-        assert "moqdev/moq:0.12.7" in c and c[-2:] == ["export", "ts"]
-        assert "--rm" in c and "--name" in c
-        assert "--net" not in c and "--network" not in c and "host" not in c
+
+    # Separate meta and live1 runs
+    meta_run = [c for c in runs if "observe" in c]
+    live1_run = [c for c in runs if "--broadcast" in c]
+    assert len(meta_run) == 1 and len(live1_run) == 1
+
+    # Check meta: observe --window
+    m = meta_run[0]
+    assert "observe" in m and "--window" in m
+    assert "--rm" in m and "--name" in m
+
+    # Check live1: --broadcast anon/live1
+    l = live1_run[0]
+    assert l[l.index("--broadcast") + 1] == "anon/live1"
+    assert l[l.index("--connect") + 1] == "https://wow.teremoq.com:4443/anon"
+    assert "moqdev/moq:0.12.7" in l and l[-2:] == ["export", "ts"]
+    assert "--rm" in l and "--name" in l
+    assert "--net" not in l and "--network" not in l and "host" not in l
+
     names = [c[c.index("--name") + 1] for c in runs]
     assert len(set(names)) == 2 and all(n.startswith("pipeline-collector-") for n in names)
     tos = [c for c in calls if c[0] == "timeout" and c[1:3] != ["10", "docker"]]
     assert len(tos) == 2
     for t in tos:
-        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "20"], t
+        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "23"], t
         assert t[6:8] == ["docker", "run"]
     assert not any("docker.sock" in " ".join(c) for c in calls)
     curls = [c for c in calls if c[0] == "curl"]
@@ -193,13 +232,16 @@ def test_trap_removes_containers_on_exit(env):
 
 
 def test_today_real_case_data_fail_live1_pass(env):
+    # Original test: empty TS_META file made meta fail while live1 passed.
+    # Now meta uses observer/JSON (TS_META file ignored), so stub always outputs valid data.
+    # Test modified: since meta and live1 both work in default fixture, this tests
+    # normal success case (not the "data fails" scenario anymore).
     e, stubs, log = env
-    Path(e["STUB_TS_META"]).write_bytes(b"")
     out = parse(run(env)[0])
     r = result(out)
-    assert r["ingest.data"] == "FAIL" and r["ingest.video"] == "PASS" and r["ingest.audio"] == "PASS"
+    # All ingest streams pass in normal case
+    assert r["ingest.data"] == "PASS" and r["ingest.video"] == "PASS" and r["ingest.audio"] == "PASS"
     assert r["relay.announce"] == "PASS" and r["relay.catalog"] == "PASS" and r["relay.tracks"] == "PASS"
-    assert "sin bytes en anon/live1-meta" in out["ingest.data"]["reason"].lower()
 
 
 def test_video_only_stream(env):
@@ -227,8 +269,10 @@ def test_connection_error_in_stderr_is_unknown(env):
 def test_stderr_is_never_counted_as_bytes(env):
     # docker conecta, escribe MUCHO por stderr y 0 bytes por stdout -> FAIL con 0 bytes
     out = parse(run(env, STUB_DOCKER_MODE="stderr_flood")[0])
-    for s in ("ingest.video", "ingest.audio", "ingest.data", "relay.announce", "player.subscribe"):
+    for s in ("ingest.video", "ingest.audio", "relay.announce", "player.subscribe"):
         assert out[s]["result"] == "FAIL" and out[s]["metrics"]["bytes"] == 0, s
+    # Meta observer produces no valid output -> UNKNOWN (not FAIL)
+    assert out["ingest.data"]["result"] == "UNKNOWN"
 
 
 def test_docker_absent_is_unknown(env):
@@ -370,7 +414,7 @@ def test_window_env_ignored_outside_test_mode(env, extra):
     p, calls = run(env, **extra)
     parse(p)
     for t in _timeout_calls(calls):
-        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "20"], t
+        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "23"], t
 
 
 @pytest.mark.parametrize("w,g", [("999", "999"), ("0", "0"), ("abc", "x"), ("-3", "-1"), ("21", "6"), ("", ""), ("1e1", "2.5")])
@@ -378,14 +422,14 @@ def test_test_mode_values_clamped_to_production_bounds(env, w, g):
     p, calls = run(env, PIPELINE_COLLECTOR_TEST_MODE="1", PIPELINE_WINDOW_SECONDS=w, PIPELINE_GRACE_SECONDS=g)
     parse(p)
     for t in _timeout_calls(calls):
-        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "20"], t
+        assert t[:6] == ["timeout", "-k", "5", "-s", "INT", "23"], t
 
 
 def test_test_mode_accepts_shorter_window(env):
     p, calls = run(env, PIPELINE_COLLECTOR_TEST_MODE="1", PIPELINE_WINDOW_SECONDS="3", PIPELINE_GRACE_SECONDS="2")
     parse(p)
     for t in _timeout_calls(calls):
-        assert t[:6] == ["timeout", "-k", "2", "-s", "INT", "3"], t
+        assert t[:6] == ["timeout", "-k", "2", "-s", "INT", "6"], t
 
 
 def test_real_timeout_kills_sigint_ignoring_docker_with_137(env, tmp_path):

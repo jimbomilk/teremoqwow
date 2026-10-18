@@ -62,6 +62,20 @@ jobs:
       - run: node player/src/moq-watch.test.ts
       - run: node player/src/overlay-engine.test.ts
 
+  # ── 3b. Tests meta-track (Fase 1 data-track, #206) ─────────────────────────
+  tests-meta-track:
+    name: tests-meta-track
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Instalar dependencias
+        run: npm --prefix ingest/meta-track ci --no-audit --no-fund
+      - name: Tests publisher/observer/schema
+        run: npm --prefix ingest/meta-track test
+
   # ── 4. Build Docker (smoke) ─────────────────────────────────────────────────
   build-smoke:
     name: build-smoke

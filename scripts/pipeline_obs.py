@@ -125,6 +125,23 @@ def _ts_valid(ts):
     return ts
 
 
+def _ts_valid_meta(ts):
+    """Validar TS específico para meta (observer output)."""
+    if not isinstance(ts, dict):
+        return None
+    # Meta requiere: observer_objects, observer_connected, monotonic, total_bytes
+    if not _is_int(ts.get("observer_objects")) or ts["observer_objects"] < 0:
+        return None
+    if not isinstance(ts.get("observer_connected"), bool):
+        return None
+    if not isinstance(ts.get("monotonic"), bool):
+        return None
+    # total_bytes is REQUIRED (puede ser 0, pero debe existir)
+    if not _is_int(ts.get("total_bytes")) or ts["total_bytes"] < 0:
+        return None
+    return ts
+
+
 # ── derivación ──────────────────────────────────────────────────────────────
 
 def _session(m, broadcast):
@@ -134,7 +151,11 @@ def _session(m, broadcast):
         if s.get("connected") is not True:
             d = s.get("detail")
             return "unknown", d[:120] if isinstance(d, str) and d else "sesión moq no conectada"
-        ts = _ts_valid(s.get("ts"))
+        # Use specific validators for each broadcast type
+        if broadcast == BROADCAST_META:
+            ts = _ts_valid_meta(s.get("ts"))
+        else:
+            ts = _ts_valid(s.get("ts"))
         if ts is None:
             return "unknown", "medición TS inválida"
         return "ok", ts
@@ -203,10 +224,27 @@ def derive(measurements) -> list[dict]:
     kind, meta = _session(m, BROADCAST_META)
     if kind == "ok":
         t = meta["total_bytes"]
-        out["ingest.data"] = (
-            _obs("ingest.data", "PASS", f"Llegaron {t} bytes en {BROADCAST_META} en {w} s.{SUFFIX}", at, bytes=t, window_seconds=w)
-            if t > 0 else
-            _obs("ingest.data", "FAIL", f"Sin bytes en {BROADCAST_META} (sesión conectada) en {w} s.{SUFFIX}", at, bytes=0, window_seconds=w))
+        objs = meta.get("observer_objects", 0)
+        mono = meta.get("monotonic", False)
+        objs_connected = meta.get("observer_connected", False)
+
+        # ingest.data PASS: connected + objects>=10 (50% of 1 Hz in 20s) + monotonic
+        min_objects = max(1, int(10 * (meta.get("observer_window_seconds", 20) / 20)))
+
+        if objs_connected and objs >= min_objects and mono:
+            out["ingest.data"] = _obs("ingest.data", "PASS",
+                f"Llegaron {t} bytes en {objs} objetos monótonos en {BROADCAST_META} en {w} s.{SUFFIX}",
+                at, bytes=t, objects=objs, window_seconds=w)
+        elif objs_connected:
+            # Connected but insufficient objects or not monotonic
+            reason = f"Sesión conectada pero {objs} objetos" if objs < min_objects else "Objetos no monótonos"
+            out["ingest.data"] = _obs("ingest.data", "FAIL",
+                f"{reason} en {BROADCAST_META} en {w} s.{SUFFIX}",
+                at, bytes=t, objects=objs, window_seconds=w)
+        else:
+            # Observer could not connect to broadcast (UNKNOWN, not FAIL)
+            out["ingest.data"] = _unknown("ingest.data", at,
+                f"Observer no pudo conectar al broadcast {BROADCAST_META}")
     else:
         out["ingest.data"] = _unknown("ingest.data", at, f"{meta} ({BROADCAST_META})")
 
