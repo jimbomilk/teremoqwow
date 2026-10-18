@@ -1,5 +1,9 @@
 {
   "devDependencies": {
     "@ericrisco/rsc": "^2.0.15"
+  },
+  "dependencies": {
+    "@moq/json": "^0.4.1",
+    "@moq/net": "^0.4.1"
   }
 }

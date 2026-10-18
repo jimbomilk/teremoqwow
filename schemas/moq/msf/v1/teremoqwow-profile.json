@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/moq/msf/v1/teremoqwow-profile.json",
+  "title": "TeremoqwowMsfProfile",
+  "description": "Perfil teremoqwow de MSF draft-01: un catálogo MSF válido que además describe los tracks actuales (video, audio, telemetry) con namespace/name/role/codec/packaging/timescale/schema. NO declara packaging=loc: los tracks de media usan el contenedor Hang y se señalan con packaging de extensión 'x-teremoqwow-hang' (+ teremoqwow.container); telemetría usa 'x-teremoqwow-json' con representation=json-snapshot-v1. Por tanto el perfil es una adopción parcial: el envoltorio del catálogo es MSF, el empaquetado no es interoperable con players MSF/LOC genéricos. 'catalog' es el nombre reservado del track estándar que transporta este catálogo y no puede ser un track de contenido. Limitación: la unicidad de (namespace,name) no es expresable en JSON Schema.",
+  "allOf": [
+    { "$ref": "https://teremoqwow.dev/schemas/moq/msf/v1/catalog.json" },
+    {
+      "type": "object",
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "contains": { "type": "object", "properties": { "role": { "const": "video" } }, "required": ["role"] },
+          "items": {
+            "not": { "type": "object", "properties": { "name": { "const": "catalog" } }, "required": ["name"] },
+            "oneOf": [
+              { "$ref": "#/$defs/videoTrack" },
+              { "$ref": "#/$defs/audioTrack" },
+              { "$ref": "#/$defs/telemetryTrack" }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "mediaTrackCommon": {
+      "type": "object",
+      "required": ["namespace", "name", "role", "codec", "packaging", "timescale", "bitrate", "isLive", "teremoqwow"],
+      "properties": {
+        "packaging": { "const": "x-teremoqwow-hang" },
+        "isLive": { "type": "boolean" },
+        "teremoqwow": {
+          "type": "object",
+          "required": ["container"],
+          "properties": { "container": { "enum": ["legacy", "cmaf"] } },
+          "not": { "required": ["representation"] }
+        }
+      }
+    },
+    "videoTrack": {
+      "allOf": [
+        { "$ref": "#/$defs/mediaTrackCommon" },
+        {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": { "role": { "const": "video" } }
+        }
+      ]
+    },
+    "audioTrack": {
+      "allOf": [
+        { "$ref": "#/$defs/mediaTrackCommon" },
+        {
+          "type": "object",
+          "required": ["samplerate", "channelConfig"],
+          "properties": { "role": { "const": "audio" } }
+        }
+      ]
+    },
+    "telemetryTrack": {
+      "type": "object",
+      "required": ["namespace", "name", "role", "packaging", "mimeType", "timescale", "isLive", "teremoqwow"],
+      "properties": {
+        "name": { "const": "telemetry" },
+        "role": { "const": "telemetry" },
+        "packaging": { "const": "x-teremoqwow-json" },
+        "mimeType": { "const": "application/json" },
+        "timescale": { "const": 90000, "description": "Reloj pts_90khz de telemetry-track-event.json." },
+        "isLive": { "const": true },
+        "teremoqwow": {
+          "type": "object",
+          "required": ["representation", "schema"],
+          "properties": {
+            "representation": { "const": "json-snapshot-v1" },
+            "schema": { "const": "https://teremoqwow.dev/schemas/sync/v1/telemetry-track-event.json" }
+          },
+          "not": { "required": ["container"] }
+        }
+      },
+      "not": { "required": ["codec"] }
+    }
+  }
+}
