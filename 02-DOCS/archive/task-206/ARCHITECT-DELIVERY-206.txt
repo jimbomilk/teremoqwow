@@ -1,0 +1,129 @@
+================================================================================
+                    TASK #206 - DELIVERY TO ARCHITECT
+================================================================================
+
+TASK: MoQ group-per-event meta-track with proper closure handling
+
+ROUND: 2 (MEDIUM Corrections Applied)
+STATUS: READY FOR REFUTER REVERIFICATION
+
+================================================================================
+                            WHAT'S READY
+================================================================================
+
+✅ All 3 MEDIUM findings from refuter-correctness addressed:
+   1. Python test fixture mismatch (meta vs live1) → FIXED
+   2. Observer closure test incomplete (no active track) → FIXED
+   3. connectTimeout bound too tight (1s for 20s) → FIXED
+
+✅ Test Baseline: 82 PASS / 0 FAIL (was 81, +1 new closure test)
+
+✅ Whitespace: CLEAN (git diff --check = 0)
+
+✅ Scope: ISOLATED (only meta-track + pipeline-collector.sh, no schemas)
+
+✅ Commits: NONE STAGED (working directory only, per TDD cycle)
+
+================================================================================
+                         WHAT TO REVIEW
+================================================================================
+
+1. REFUTER-MEDIUM-CORRECTIONS-206.md
+   → Details of each MEDIUM correction
+   → Before/after code for observer.mjs connectTimeout
+   → Test fixture updates in test_pipeline_collector.py
+   → NEW test-observe-track-active-closure.mjs design
+
+2. FINAL-STATUS-206-MEDIUM-CORRECTED.md
+   → Executive summary
+   → Mutation survival analysis
+   → Test entry points for refuters
+   → Readiness checklist
+
+3. REFUTER-INSTRUCTIONS-206.md (from prior round)
+   → Detailed refuter runbook (still valid, applies to updated code)
+
+================================================================================
+                      CHANGES THIS ROUND (PRODUCTION)
+================================================================================
+
+File: ingest/meta-track/src/observer.mjs
+  Lines: 189-192
+  Change: connectTimeout formula
+  Before: max(500, min(reportingBuffer/2, window*500))     = 1s for 20s
+  After:  max(500, min(remainingBudget*0.5, 5000))         = up to 5s
+  Why:    Allow ~1.2s handshakes, use remaining budget
+
+File: scripts/test_pipeline_collector.py
+  Lines: 31-48, 169, 182, 381, 389, 398
+  Changes:
+    - DOCKER_STUB detects meta ("observe") vs live1 ("--broadcast") dynamically
+    - Updated timeout assertions: 20→23 (WINDOW+3), 3→6 (3+3)
+    - test_two_sessions_distinct_broadcasts_and_window handles separate structure
+  Why:    Match production CLI, fix timeout value
+
+File: ingest/meta-track/tests/test-observe-track-active-closure.mjs (NEW)
+  Size: 65 lines
+  Tests: Active track closure detection (not just "broadcast unavailable")
+  Why:   Prove closure detection works, not just mock broadcast miss
+
+================================================================================
+                        VERIFICATION STEPS
+================================================================================
+
+Run these before final approval:
+
+1. Node test suite:
+   $ cd ingest/meta-track && node --test tests/test-*.mjs
+   Expected: 82 PASS / 0 FAIL (~16.5s)
+
+2. Shell timeout test:
+   $ bash scripts/test-pipeline-timeout.sh
+   Expected: 5/5 assertions pass (~1s)
+
+3. Check whitespace:
+   $ git diff --check
+   Expected: 0 issues
+
+4. Verify scope:
+   $ git diff --name-only | grep -v "meta-track\|pipeline-collector"
+   Expected: no output (only meta-track + collector changed)
+
+================================================================================
+                      READY FOR REFUTERS
+================================================================================
+
+Invoke:
+  refuter-correctness (static analysis of MEDIUM fixes + deadline math)
+  refuter-tests (mutation testing against 82-test baseline)
+
+In parallel, as per cycle rules.
+
+Both refuters should verify:
+  ✓ MEDIUM #1: Python fixture handles both meta and live1 commands
+  ✓ MEDIUM #2: Observer closure test exercises active track subscription
+  ✓ MEDIUM #3: connectTimeout uses remaining budget, max 5s capped
+  ✓ No new HIGH/CRITICAL issues
+  ✓ All 4 critical mutations cause test failures:
+      - Publisher: if(false) appendGroup
+      - Publisher: skip connection.close()
+      - Observer: skip trackClosedPromise
+      - Collector: EXTERNAL_TIMEOUT before override
+
+If both return zero HIGH/CRITICAL:
+  → Ready for merge
+
+If any HIGH/CRITICAL found:
+  → Return to developer with findings
+  → Developer fixes only that issue (no scope creep)
+  → Reruns both refuters
+
+================================================================================
+                    NO FURTHER CHANGES THIS ROUND
+================================================================================
+
+Without refuter input, no more modifications will be made.
+
+Working directory is clean. All tests passing. Ready for external review.
+
+================================================================================

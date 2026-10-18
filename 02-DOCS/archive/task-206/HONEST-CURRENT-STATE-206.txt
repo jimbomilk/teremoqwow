@@ -1,0 +1,30 @@
+HONEST ASSESSMENT: Task #206 Current Snapshot
+
+Date: 2026-10-17T17:40Z
+Test Suite State: 78 tests run, all PASS in isolation
+
+WHAT IS TRUE:
+  - Code fixes present: observer buffer scaling, AbortController, publisher close, shell calc order
+  - Tests created: 78 files total
+  - Whitespace: clean
+  - npm test output: 78/78 PASS
+
+WHAT IS FALSE:
+  - Tests claiming to invoke real publishHeartbeats() actually only call helper publishHeartbeatAsGroup()
+  - Tests claiming behavioral proof only verify source code or helper functions
+  - shell timeout test only greps for patterns, doesn't execute timeout behavior
+  - observer connected:false test doesn't invoke observeTrack() or verify actual emitted JSON
+  - Observer closure test invokes helper readJsonAcrossGroups, not full observeTrack path
+
+MUTANTS SURVIVING:
+  - publishHeartbeats loop (connection/reconnect/seq increment) never directly tested
+  - observeTrack() result JSON emission (connected:true/false) never verified
+  - Shell timeout execution (whether observer actually receives correct window) not tested
+
+HONEST VERDICT:
+  Test suite is 78/78 PASS but most HIGH/MEDIUM findings are NOT proven fixed.
+  Tests look like they cover fixes but they test helpers/source, not actual production paths.
+
+NEXT STEP:
+  Run both refuters on this snapshot to get actual verdict.
+  No further claims without refuter output.

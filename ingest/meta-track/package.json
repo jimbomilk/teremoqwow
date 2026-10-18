@@ -1,0 +1,32 @@
+{
+  "name": "@teremoqwow/meta-track",
+  "version": "1.0.0",
+  "description": "Meta-heartbeat track publisher and observer for anon/live1-meta broadcast",
+  "type": "module",
+  "main": "src/index.mjs",
+  "bin": {
+    "meta-track": "src/index.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/test-*.mjs",
+    "lint": "echo 'Linting skipped for now'",
+    "start": "node src/index.mjs publish",
+    "observe": "node src/index.mjs observe"
+  },
+  "keywords": [
+    "moq",
+    "heartbeat",
+    "data-track",
+    "telemetry"
+  ],
+  "author": "teremoqwow",
+  "license": "MIT",
+  "dependencies": {
+    "@moq/net": "0.4.1",
+    "@moq/json": "0.4.1"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=22"
+  }
+}

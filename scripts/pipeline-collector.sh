@@ -43,6 +43,10 @@ URL_MOQ="https://wow.teremoq.com:4443/anon"
 WINDOW=20
 GRACE=5
 EXIT_COLLECTOR_FAILURE=3
+# HIGH FIX #2: Observer internal deadline = window - buffer for connection+reporting
+# But external timeout must account for Docker startup (can be 1-3s on cold start)
+# So we add a startup buffer to the external timeout
+STARTUP_BUFFER=3  # 3 seconds for Docker startup + connection init
 
 if [ "${PIPELINE_COLLECTOR_TEST_MODE:-}" = "1" ]; then
   case "${PIPELINE_WINDOW_SECONDS:-}" in
@@ -51,6 +55,23 @@ if [ "${PIPELINE_COLLECTOR_TEST_MODE:-}" = "1" ]; then
   case "${PIPELINE_GRACE_SECONDS:-}" in
     [1-5]) GRACE="$PIPELINE_GRACE_SECONDS" ;;
   esac
+fi
+
+# FIX #3: Calculate EXTERNAL_TIMEOUT AFTER test overrides are applied
+# Validate STARTUP_BUFFER >= observer's internal buffer (500ms-2s depending on window)
+# For window=1, observer buffer=500ms, so startup should be >= 0.5s
+# For window=20, observer buffer=2s, so startup should be >= 2s
+# We use STARTUP_BUFFER=3 which covers all cases
+EXTERNAL_TIMEOUT=$((WINDOW + STARTUP_BUFFER))
+
+if [ "${PIPELINE_COLLECTOR_TEST_MODE:-}" = "1" ]; then
+  # In test mode, allow external timeout override (strict numeric validation)
+  if [ -n "${PIPELINE_EXTERNAL_TIMEOUT:-}" ]; then
+    # Validate: must be a number between 5 and 60 (reasonable bounds)
+    if [ "$PIPELINE_EXTERNAL_TIMEOUT" -ge 5 ] 2>/dev/null && [ "$PIPELINE_EXTERNAL_TIMEOUT" -le 60 ] 2>/dev/null; then
+      EXTERNAL_TIMEOUT="$PIPELINE_EXTERNAL_TIMEOUT"
+    fi
+  fi
 fi
 
 TMP="$(mktemp -d 2>/dev/null)" || TMP=""
@@ -74,10 +95,24 @@ measure_session() {
   local tag="$1" broadcast="$2" name rcs
   name="pipeline-collector-$$-${tag}"
   NAMES+=("$name")
-  timeout -k "$GRACE" -s INT "$WINDOW" docker run --rm --name "$name" "$IMAGE" \
-    --connect "$URL_MOQ" --broadcast "$broadcast" export ts \
-    2>"$TMP/${tag}.stderr" \
-    | "$PY" "$SCRIPT_DIR/pipeline_ts_count.py" >"$TMP/${tag}.ts.json" 2>>"$TMP/${tag}.stderr"
+
+  # Para meta, usar el observer del meta-track container
+  if [ "$tag" = "meta" ]; then
+    # HIGH FIX #2: Use EXTERNAL_TIMEOUT (includes startup buffer) instead of raw WINDOW
+    # so that SIGINT doesn't kill healthy observer before report is emitted
+    timeout -k "$GRACE" -s INT "$EXTERNAL_TIMEOUT" docker run --rm --name "$name" \
+      --network teremoqwow-prod "teremoqwow-meta-track:1" \
+      observe --window "$WINDOW" \
+      2>"$TMP/${tag}.stderr" \
+      | "$PY" "$SCRIPT_DIR/pipeline_meta_observe.py" >"$TMP/${tag}.ts.json" 2>>"$TMP/${tag}.stderr"
+  else
+    # Para live1, usar export ts del moq CLI
+    timeout -k "$GRACE" -s INT "$EXTERNAL_TIMEOUT" docker run --rm --name "$name" "$IMAGE" \
+      --connect "$URL_MOQ" --broadcast "$broadcast" export ts \
+      2>"$TMP/${tag}.stderr" \
+      | "$PY" "$SCRIPT_DIR/pipeline_ts_count.py" >"$TMP/${tag}.ts.json" 2>>"$TMP/${tag}.stderr"
+  fi
+
   rcs=("${PIPESTATUS[@]}")
   printf '%s\n' "${rcs[0]}" >"$TMP/${tag}.rc"
 }

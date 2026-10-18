@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teremoqwow.dev/schemas/media/v1/meta-heartbeat.json",
+  "title": "MetaHeartbeat",
+  "description": "Evento sintético mínimo (heartbeat ~1 Hz) del track `heartbeat` del broadcast hermano `anon/live1-meta` (Fase 1, #206). Un grupo MoQ por evento, un frame por grupo, cuerpo = este JSON en UTF-8. Prueba SOLO llegada de datos/transporte: no contiene ni afirma nada sobre calidad audiovisual. `seq` es monotónico estricto dentro de un `boot_id`; al reiniciar el publicador cambia `boot_id` y `seq` vuelve a 0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "boot_id", "seq", "emitted_at"],
+  "properties": {
+    "v": { "type": "integer", "const": 1, "description": "Versión del schema del evento." },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "Identificador aleatorio (16 hex) de la ejecución del publicador; distingue reinicios."
+    },
+    "seq": { "type": "integer", "minimum": 0, "description": "Contador monotónico estricto (+1 por evento) dentro de un boot_id." },
+    "emitted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Reloj del servidor publicador (UTC, RFC 3339, precisión de ms)."
+    },
+    "source_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9/_-]{0,63}$",
+      "description": "Opcional. Broadcast de medios al que acompaña, p. ej. anon/live1."
+    }
+  }
+}
