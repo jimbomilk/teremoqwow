@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - name: Run collector on prod host and ingest
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_HOST }}
           username: deploy
